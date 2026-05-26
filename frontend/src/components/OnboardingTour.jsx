@@ -23,8 +23,8 @@ export default function OnboardingTour({ onClose }) {
 
   const s = STEPS[step];
   return (
-    <div className="tour-overlay" data-testid="onboarding-tour">
-      <div className="tour-card">
+    <div className="tour-overlay" data-testid="onboarding-tour" onClick={finish}>
+      <div className="tour-card" onClick={(e) => e.stopPropagation()}>
         <div className="tour-step">STEP {step + 1} OF {STEPS.length}</div>
         <div className="tour-title">{s.title}</div>
         <div className="tour-body">{s.body}</div>
@@ -34,6 +34,9 @@ export default function OnboardingTour({ onClose }) {
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn-ghost" onClick={finish} data-testid="tour-skip">Skip</button>
+            {step > 0 && (
+              <button className="btn-ghost" onClick={() => setStep(step - 1)} data-testid="tour-prev">← Back</button>
+            )}
             {step < STEPS.length - 1 ? (
               <button className="btn-primary" onClick={() => setStep(step + 1)} data-testid="tour-next">Next →</button>
             ) : (

@@ -65,7 +65,7 @@ export default function LegalGate() {
                 type="checkbox"
                 checked={checked[d.key]}
                 onChange={(e) => setChecked({ ...checked, [d.key]: e.target.checked })}
-                data-testid={`legal-${d.key}`}
+                data-testid={`legal-cb-${d.key === "code_of_conduct" ? "conduct" : d.key}`}
                 style={{ width: 16, height: 16, accentColor: "var(--purple)" }}
               />
               I have read and agree to the {d.title}.
@@ -80,7 +80,7 @@ export default function LegalGate() {
           style={{ width: "100%", padding: 14, fontSize: 14 }}
           onClick={onSubmit}
           disabled={!allChecked || loading}
-          data-testid="legal-continue"
+          data-testid="legal-accept"
         >
           {loading ? "Saving…" : "Continue"}
         </button>

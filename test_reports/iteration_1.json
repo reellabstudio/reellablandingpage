@@ -1,0 +1,57 @@
+{
+  "summary": "First end-to-end QA pass for ReelLab Studio MVP. Backend: 25/25 pytest tests pass covering auth, clients, projects, AI editor flow, invoices, community + stars, help bot, and CEO endpoints. Frontend: critical flows verified — Register → Legal Gate → Dashboard works, CEO login redirects to /ceo and Back Office renders with live data (users, projects, invoices, posts counters). Onboarding tour appears for new users. All Stripe/AI integrations confirmed mocked and complete instantly. Two minor frontend issues observed (see below).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "OnboardingTour",
+        "issue": "Tour overlay (after first registration on /dashboard) intercepts clicks on background nav links (e.g. AI Editor) and the theme-toggle button. User must Skip/finish the tour before those controls become reliably clickable. Suggest making the tour pointer-events:none on the dimming layer or auto-dismiss when nav is clicked.",
+        "selector": "[data-testid='nav-ai-editor'], [data-testid='theme-toggle']",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Legal Gate & OnboardingTour",
+        "issues": [
+          "Legal Gate 'Continue' button and the 3 acceptance checkboxes have no data-testid (spec claims all interactive elements do). Tests had to fall back to text matching.",
+          "OnboardingTour Skip/Next buttons also lack data-testid attributes."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add data-testid to LegalGate checkboxes (e.g. legal-cb-terms, legal-cb-conduct, legal-cb-tos) and Continue button (legal-accept).",
+    "Add data-testid to OnboardingTour controls (tour-skip, tour-next, tour-prev).",
+    "Ensure OnboardingTour overlay does not block top-nav/theme-toggle clicks, OR auto-dismiss when user navigates away. Right now overlay swallows pointer events for header buttons on first dashboard visit.",
+    "(Nice-to-have) consistent testid suffix — login uses 'login-email' but register also uses 'register-email' (good); these match. No change required."
+  ],
+  "critical_code_review_comments": [
+    "Auth uses JWT Bearer with HS256 and 7-day expiry stored in localStorage as 'rl_token' (per spec). No httpOnly cookie option — acceptable for MVP scope, but worth flagging for production hardening (XSS exposure).",
+    "CEO seeded on startup with password 'ReelLabceo26!' hardcoded; consider env var for production deployment.",
+    "All money/total computations on backend (invoice total = sum(items.amount)) — verified correct.",
+    "Community star endpoint correctly enforces 1/day/recipient limit and blocks self-stars (tested).",
+    "Help bot keyword matcher returns sensible fallback for no-match (verified)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (new — 25 pytest cases)"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25)",
+    "frontend": "~85% — all primary user flows pass; onboarding overlay blocks 2 secondary controls"
+  },
+  "test_credentials": "CEO: ceo@reellabstudio.com / ReelLabceo26! (verified). Test studio users are registered dynamically with TEST_*@example.com prefix.",
+  "seed_data_creation": "Each pytest run registers one fresh studio user (TEST_studio_<hex>@example.com) and creates TEST_-prefixed clients, projects, invoices, community posts that remain in DB (no cleanup endpoint exposed). CEO is pre-seeded by backend startup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite is /app/backend/tests/backend_test.py — run with `pytest /app/backend/tests/backend_test.py -v`. Note pydantic EmailStr rejects '.test' TLD; use '@example.com'. Frontend testids: login-{email,password,submit}, register-{display-name,username,email,password,submit}, nav-{dashboard,projects,clients,ai-editor,invoices,community}, nav-ceo, theme-toggle, user-menu-btn, menu-logout. Legal Gate + OnboardingTour controls lack testids — flagged as action item. AI Editor route is /editor (not /ai-editor). Test reports XML at /app/test_reports/pytest/pytest_results.xml.",
+  "rca_of_the_issue": "OnboardingTour overlay click-interception RCA: on a brand-new user the tour mounts on Dashboard with a full-screen translucent backdrop. The backdrop element captures pointer events for the area outside the modal card, blocking the underlying nav links and theme-toggle until tour is dismissed. Reproduction: register a fresh user, accept legal, land on /dashboard, click 'AI Editor' nav link — URL stays at /dashboard. Mitigation: either set pointer-events:none on the backdrop, attach a click handler that auto-dismisses, or render the tour after the nav z-index."
+}

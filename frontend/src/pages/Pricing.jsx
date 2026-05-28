@@ -73,6 +73,7 @@ export default function Pricing() {
     const monthly = yearly ? Math.round(p.yearly / 12) : p.monthly;
     return (
       <div className={`plan-card ${featured ? "featured" : ""}`} data-testid={`plan-${key}`}>
+        {featured && <div className="plan-most-popular" data-testid="plan-most-popular">Most Popular</div>}
         <div className="plan-name">{name}</div>
         <div className="plan-tagline">{tagline}</div>
         <div className="plan-amount"><sup>$</sup>{monthly}</div>

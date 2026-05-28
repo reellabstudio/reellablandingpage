@@ -179,7 +179,7 @@
 .plan-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 32px 28px; position: relative; transition: border-color .2s, transform .2s; }
 .plan-card:hover { transform: translateY(-4px); }
 .plan-card.featured { border-color: var(--purple-border); background: linear-gradient(160deg, var(--surface) 0%, rgba(123,79,212,.06) 100%); }
-.plan-card.featured::before { content: 'Most Popular'; position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--purple); color: #fff; font-size: 10px; font-family: 'DM Mono', monospace; letter-spacing: .08em; padding: 4px 14px; border-radius: 99px; white-space: nowrap; }
+.plan-most-popular { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: var(--purple); color: #fff; font-size: 10px; font-family: 'DM Mono', monospace; letter-spacing: .08em; padding: 4px 14px; border-radius: 99px; white-space: nowrap; }
 .plan-name { font-size: 11px; font-family: 'DM Mono', monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
 .plan-tagline { font-size: 13px; color: var(--text-sec); font-weight: 300; margin-bottom: 24px; line-height: 1.5; }
 .plan-amount { font-family: 'Playfair Display', serif; font-size: 3rem; font-weight: 400; line-height: 1; }

@@ -221,6 +221,83 @@ class BadgeAssignIn(BaseModel):
     badge: Literal["none", "blue", "gold"]
 
 
+class WaitlistIn(BaseModel):
+    email: EmailStr
+    source: str = "hero"
+
+
+class FounderIn(BaseModel):
+    name: str
+    email: EmailStr
+    creator_type: str = ""
+    handle: str = ""
+
+
+class FaqItem(BaseModel):
+    category: str
+    question: str
+    answer: str
+    keywords: List[str] = []
+
+
+class PricingIn(BaseModel):
+    plan: Literal["solo", "creator", "studio"]
+    monthly: float
+    yearly: float
+
+
+class SettingsIn(BaseModel):
+    key: str
+    value: bool
+
+
+class EmailTemplateIn(BaseModel):
+    key: str
+    subject: str
+    body: str
+
+
+class UserAdminIn(BaseModel):
+    user_id: str
+    plan: Optional[str] = None
+    status: Optional[Literal["active", "pending", "suspended"]] = None
+    badge: Optional[Literal["none", "blue", "gold"]] = None
+
+
+class FlagIn(BaseModel):
+    target_type: Literal["post", "comment", "user"]
+    target_id: str
+    reason: str
+
+
+class ModerationResolveIn(BaseModel):
+    action: Literal["dismiss", "remove", "warn", "suspend"]
+    note: str = ""
+
+
+DEFAULT_PRICING = {
+    "solo": {"monthly": 19.0, "yearly": 180.0},
+    "creator": {"monthly": 49.0, "yearly": 468.0},
+    "studio": {"monthly": 199.0, "yearly": 1908.0},
+}
+
+DEFAULT_SETTINGS = {
+    "new_signups": True,
+    "maintenance": False,
+    "community": True,
+    "affiliates": True,
+    "dummy_data": True,
+    "email_notifications": True,
+}
+
+DEFAULT_EMAILS = {
+    "welcome": {"subject": "Welcome to ReelLab Studio ✦", "body": "Hi {{name}},\n\nWelcome to ReelLab. Your studio is ready — log in and create your first project.\n\n— The ReelLab Team"},
+    "invoice_paid": {"subject": "Payment received — {{invoice_number}}", "body": "Hi {{name}},\n\nWe've received your payment of ${{amount}} for {{invoice_number}}. Thank you!\n\n— ReelLab"},
+    "project_delivered": {"subject": "Your project is delivered 🎬", "body": "Hi {{name}},\n\nYour project '{{project_name}}' is ready for review.\n\n— ReelLab"},
+    "founder_welcome": {"subject": "Welcome to the Founder Circle", "body": "Hi {{name}},\n\nYou're officially part of the ReelLab Founder Circle. We'll be in touch personally with early access details.\n\n— The Founders"},
+}
+
+
 # ---------- Auth ----------
 @api.post("/auth/register")
 async def register(body: RegisterIn):
@@ -786,6 +863,306 @@ async def ceo_activity(user: dict = Depends(require_ceo)):
     return {"activity": rows}
 
 
+# ---------- Public: Waitlist & Founder Circle ----------
+@api.post("/waitlist")
+async def join_waitlist(body: WaitlistIn):
+    email = body.email.lower().strip()
+    existing = await db.waitlist.find_one({"email": email})
+    if existing:
+        # Idempotent — return success but flag
+        return {"ok": True, "already_joined": True}
+    entry = {
+        "id": str(uuid.uuid4()),
+        "email": email,
+        "source": body.source,
+        "joined_at": now_iso(),
+        "status": "pending",
+    }
+    await db.waitlist.insert_one(entry)
+    await db.activity_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": "amber",
+        "text": f"<strong>{email}</strong> joined the waitlist",
+        "at": now_iso(),
+    })
+    return {"ok": True, "already_joined": False}
+
+
+@api.post("/founder-circle")
+async def join_founder_circle(body: FounderIn):
+    email = body.email.lower().strip()
+    existing = await db.founders.find_one({"email": email})
+    if existing:
+        return {"ok": True, "already_joined": True}
+    entry = {
+        "id": str(uuid.uuid4()),
+        "name": body.name,
+        "email": email,
+        "creator_type": body.creator_type,
+        "handle": body.handle,
+        "joined_at": now_iso(),
+        "status": "applied",
+    }
+    await db.founders.insert_one(entry)
+    await db.activity_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": "purple",
+        "text": f"<strong>{body.name}</strong> joined the Founder Circle ({body.creator_type or 'creator'})",
+        "at": now_iso(),
+    })
+    return {"ok": True, "already_joined": False}
+
+
+# ---------- Public: Pricing & Public FAQ ----------
+@api.get("/pricing")
+async def get_pricing():
+    doc = await db.settings.find_one({"key": "pricing"}, {"_id": 0})
+    return {"pricing": doc.get("value", DEFAULT_PRICING) if doc else DEFAULT_PRICING}
+
+
+@api.get("/public/faq")
+async def public_faq():
+    items = await db.faq.find({"published": True}, {"_id": 0}).sort("category", 1).to_list(200)
+    if not items:
+        return {"faq": FAQ}
+    return {"faq": items}
+
+
+# ---------- CEO: Waitlist & Founders ----------
+@api.get("/ceo/waitlist")
+async def ceo_waitlist(user: dict = Depends(require_ceo)):
+    rows = await db.waitlist.find({}, {"_id": 0}).sort("joined_at", -1).to_list(1000)
+    return {"waitlist": rows}
+
+
+@api.get("/ceo/founders")
+async def ceo_founders(user: dict = Depends(require_ceo)):
+    rows = await db.founders.find({}, {"_id": 0}).sort("joined_at", -1).to_list(1000)
+    return {"founders": rows}
+
+
+# ---------- CEO: User admin ----------
+@api.patch("/ceo/users")
+async def ceo_update_user(body: UserAdminIn, user: dict = Depends(require_ceo)):
+    upd = {}
+    if body.plan is not None: upd["plan"] = body.plan
+    if body.status is not None: upd["status"] = body.status
+    if body.badge is not None:
+        upd["badge"] = body.badge
+        upd["is_studio"] = body.badge == "blue"
+        upd["is_affiliate"] = body.badge == "gold"
+    if upd:
+        await db.users.update_one({"id": body.user_id}, {"$set": upd})
+    return {"ok": True}
+
+
+@api.delete("/ceo/users/{uid}")
+async def ceo_delete_user(uid: str, user: dict = Depends(require_ceo)):
+    if uid == user["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    await db.users.delete_one({"id": uid})
+    return {"ok": True}
+
+
+# ---------- CEO: FAQ Editor ----------
+@api.get("/ceo/faq")
+async def ceo_list_faq(user: dict = Depends(require_ceo)):
+    items = await db.faq.find({}, {"_id": 0}).sort("category", 1).to_list(500)
+    return {"faq": items}
+
+
+@api.post("/ceo/faq")
+async def ceo_create_faq(body: FaqItem, user: dict = Depends(require_ceo)):
+    item = {
+        "id": str(uuid.uuid4()),
+        "category": body.category,
+        "question": body.question,
+        "answer": body.answer,
+        "keywords": body.keywords,
+        "published": True,
+        "created_at": now_iso(),
+    }
+    await db.faq.insert_one(item)
+    item.pop("_id", None)
+    return {"faq": item}
+
+
+@api.patch("/ceo/faq/{fid}")
+async def ceo_update_faq(fid: str, body: FaqItem, user: dict = Depends(require_ceo)):
+    await db.faq.update_one({"id": fid}, {"$set": body.model_dump()})
+    return {"ok": True}
+
+
+@api.delete("/ceo/faq/{fid}")
+async def ceo_delete_faq(fid: str, user: dict = Depends(require_ceo)):
+    await db.faq.delete_one({"id": fid})
+    return {"ok": True}
+
+
+# ---------- CEO: Pricing editor ----------
+@api.put("/ceo/pricing")
+async def ceo_update_pricing(body: PricingIn, user: dict = Depends(require_ceo)):
+    existing = await db.settings.find_one({"key": "pricing"})
+    current = existing.get("value", DEFAULT_PRICING) if existing else DEFAULT_PRICING.copy()
+    current[body.plan] = {"monthly": body.monthly, "yearly": body.yearly}
+    await db.settings.update_one(
+        {"key": "pricing"},
+        {"$set": {"value": current, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "pricing": current}
+
+
+@api.post("/ceo/pricing/sync-stripe")
+async def ceo_sync_stripe(user: dict = Depends(require_ceo)):
+    """MOCKED — would push pricing to Stripe Products/Prices API."""
+    await db.activity_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": "purple",
+        "text": "<strong>CEO</strong> synced pricing to Stripe (MOCKED)",
+        "at": now_iso(),
+    })
+    return {"ok": True, "mocked": True, "message": "Stripe sync simulated. Add live keys at deploy."}
+
+
+# ---------- CEO: Platform settings ----------
+@api.get("/ceo/settings")
+async def ceo_get_settings(user: dict = Depends(require_ceo)):
+    doc = await db.settings.find_one({"key": "platform"}, {"_id": 0})
+    return {"settings": doc.get("value", DEFAULT_SETTINGS) if doc else DEFAULT_SETTINGS}
+
+
+@api.put("/ceo/settings")
+async def ceo_update_settings(body: SettingsIn, user: dict = Depends(require_ceo)):
+    doc = await db.settings.find_one({"key": "platform"})
+    current = doc.get("value", DEFAULT_SETTINGS.copy()) if doc else DEFAULT_SETTINGS.copy()
+    current[body.key] = body.value
+    await db.settings.update_one(
+        {"key": "platform"},
+        {"$set": {"value": current, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "settings": current}
+
+
+# ---------- CEO: Email templates ----------
+@api.get("/ceo/email-templates")
+async def ceo_list_templates(user: dict = Depends(require_ceo)):
+    doc = await db.settings.find_one({"key": "email_templates"}, {"_id": 0})
+    return {"templates": doc.get("value", DEFAULT_EMAILS) if doc else DEFAULT_EMAILS}
+
+
+@api.put("/ceo/email-templates")
+async def ceo_update_template(body: EmailTemplateIn, user: dict = Depends(require_ceo)):
+    doc = await db.settings.find_one({"key": "email_templates"})
+    current = doc.get("value", DEFAULT_EMAILS.copy()) if doc else DEFAULT_EMAILS.copy()
+    current[body.key] = {"subject": body.subject, "body": body.body}
+    await db.settings.update_one(
+        {"key": "email_templates"},
+        {"$set": {"value": current, "updated_at": now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True, "templates": current}
+
+
+# ---------- CEO: Moderation ----------
+@api.post("/community/flag")
+async def flag_content(body: FlagIn, user: dict = Depends(get_current_user)):
+    flag = {
+        "id": str(uuid.uuid4()),
+        "target_type": body.target_type,
+        "target_id": body.target_id,
+        "reason": body.reason,
+        "reporter_id": user["id"],
+        "status": "open",
+        "created_at": now_iso(),
+    }
+    await db.moderation_flags.insert_one(flag)
+    return {"ok": True}
+
+
+@api.get("/ceo/moderation")
+async def ceo_moderation(user: dict = Depends(require_ceo)):
+    flags = await db.moderation_flags.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return {"flags": flags}
+
+
+@api.post("/ceo/moderation/{fid}/resolve")
+async def ceo_resolve_flag(fid: str, body: ModerationResolveIn, user: dict = Depends(require_ceo)):
+    await db.moderation_flags.update_one(
+        {"id": fid},
+        {"$set": {"status": "resolved", "action": body.action, "note": body.note, "resolved_at": now_iso()}},
+    )
+    return {"ok": True}
+
+
+# ---------- CEO: Dummy data ----------
+@api.post("/ceo/dummy-data/seed")
+async def ceo_seed_dummy(user: dict = Depends(require_ceo)):
+    """Seed dummy projects/clients for demo. Marks them with demo=True."""
+    dummy_clients = [
+        {"name": "Oat & Co.", "email": "hello@oatco.example", "company": "Oat & Co."},
+        {"name": "Maya Chen", "email": "maya@example.com", "company": "Maya Media"},
+        {"name": "Northside Gym", "email": "info@northside.example", "company": "Northside Gym"},
+        {"name": "Luma Studios", "email": "studio@luma.example", "company": "Luma Studios"},
+    ]
+    created = 0
+    for c in dummy_clients:
+        existing = await db.clients.find_one({"owner_id": user["id"], "name": c["name"]})
+        if existing:
+            continue
+        await db.clients.insert_one({
+            "id": str(uuid.uuid4()),
+            "owner_id": user["id"],
+            **c,
+            "phone": "",
+            "notes": "Demo client (clearable)",
+            "demo": True,
+            "created_at": now_iso(),
+        })
+        created += 1
+
+    dummy_projects = [
+        {"name": "Summer Campaign", "client_name": "Oat & Co.", "status": "editing"},
+        {"name": "Podcast Clips S3", "client_name": "Maya Chen", "status": "review"},
+        {"name": "Product Launch Reel", "client_name": "Northside Gym", "status": "delivered"},
+        {"name": "Brand Story", "client_name": "Luma Studios", "status": "active"},
+    ]
+    for p in dummy_projects:
+        existing = await db.projects.find_one({"owner_id": user["id"], "name": p["name"]})
+        if existing:
+            continue
+        await db.projects.insert_one({
+            "id": str(uuid.uuid4()),
+            "owner_id": user["id"],
+            "name": p["name"],
+            "client_id": None,
+            "client_name": p["client_name"],
+            "deliverables": [{"title": "Main video", "format": "16:9", "duration": "60s"}],
+            "scope": "Demo project",
+            "due_date": "",
+            "revision_rounds": 2,
+            "budget": 1500,
+            "notes": "",
+            "status": p["status"],
+            "demo": True,
+            "checklist": [],
+            "messages": [],
+            "deliverable_versions": [],
+            "team": [],
+            "created_at": now_iso(),
+        })
+        created += 1
+    return {"ok": True, "created": created}
+
+
+@api.delete("/ceo/dummy-data")
+async def ceo_clear_dummy(user: dict = Depends(require_ceo)):
+    cl = await db.clients.delete_many({"demo": True})
+    pr = await db.projects.delete_many({"demo": True})
+    return {"ok": True, "clients_removed": cl.deleted_count, "projects_removed": pr.deleted_count}
+
+
 # ---------- Startup ----------
 @app.on_event("startup")
 async def on_startup():
@@ -839,6 +1216,27 @@ async def on_startup():
                 {"$set": {"password_hash": hash_password(ceo_password), "role": "ceo"}},
             )
             logger.info("Updated CEO password from .env")
+
+
+    # Seed default settings, pricing, FAQ, email templates (idempotent)
+    if not await db.settings.find_one({"key": "pricing"}):
+        await db.settings.insert_one({"key": "pricing", "value": DEFAULT_PRICING, "updated_at": now_iso()})
+    if not await db.settings.find_one({"key": "platform"}):
+        await db.settings.insert_one({"key": "platform", "value": DEFAULT_SETTINGS, "updated_at": now_iso()})
+    if not await db.settings.find_one({"key": "email_templates"}):
+        await db.settings.insert_one({"key": "email_templates", "value": DEFAULT_EMAILS, "updated_at": now_iso()})
+    # Seed FAQ if empty
+    if await db.faq.count_documents({}) == 0:
+        for f in FAQ:
+            await db.faq.insert_one({
+                "id": str(uuid.uuid4()),
+                "category": f["category"],
+                "question": f["q"],
+                "answer": f["a"],
+                "keywords": f["k"],
+                "published": True,
+                "created_at": now_iso(),
+            })
 
 
 @app.on_event("shutdown")

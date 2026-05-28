@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
 import HelpBot from "./components/HelpBot";
 import Landing from "./pages/Landing";
+import Pricing from "./pages/Pricing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import LegalGate from "./pages/LegalGate";
@@ -42,12 +43,22 @@ function AppShell({ children }) {
   );
 }
 
+function HelpBotWrapper({ children }) {
+  return (
+    <>
+      {children}
+      <HelpBot />
+    </>
+  );
+}
+
 function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Landing />} />
+          <Route path="/pricing" element={<Pricing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/legal" element={<Protected requireLegal={false}><LegalGate /></Protected>} />
@@ -62,7 +73,7 @@ function App() {
           <Route path="/editor" element={<Protected><AppShell><AIEditor /></AppShell></Protected>} />
           <Route path="/community" element={<Protected><AppShell><Community /></AppShell></Protected>} />
           <Route path="/profile" element={<Protected><AppShell><Profile /></AppShell></Protected>} />
-          <Route path="/ceo" element={<Protected requireLegal={false}><AppShell><CEOBackOffice /></AppShell></Protected>} />
+          <Route path="/ceo" element={<Protected requireLegal={false}><HelpBotWrapper><CEOBackOffice /></HelpBotWrapper></Protected>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

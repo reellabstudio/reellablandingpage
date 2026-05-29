@@ -1,92 +1,82 @@
-# ReelLab Studio – Product Requirements Document (PRD)
+# ReelLab Studio – PRD (v3 — deployment-ready)
 
 ## Original problem statement
-> Build the fully functional ReelLab Studio app. Use the HTML for screen 24. Attached are all forms of the Logo to use throughout the app. For the CEO back office use the email `ceo@reellabstudio.com` (and I'll create the password).
->
-> Iteration 2 (2026-05-28): Full site/app update using 3 official HTMLs (Landing, CEO Back Office, Onboarding). Goal: "fully created before deployment so once deployed, no edits or updates will be needed (for the first 90 days at least)".
+> Build the fully functional ReelLab Studio app from the official HTMLs. CEO email `ceo@reellabstudio.com`. Goal: "fully created before deployment, no edits needed for first 90 days."
 
-User choices confirmed:
-- Stripe: **kept mocked**, keys to be swapped at deployment
-- Founder Circle: **free signup**, save to MongoDB
-- Waitlist: save to MongoDB so CEO sees all signups in back office
-- CEO password: `ReelLabceo26!`
-- Help Bot: FAQ keyword matching
+## Tech stack
+- **Backend**: FastAPI + Motor (MongoDB) + emergentintegrations.payments.stripe + Python smtplib
+- **Frontend**: React 19 + React Router 7 + axios + lucide-react
+- **Fonts**: DM Sans / DM Mono / Playfair Display
+- **Palette**: purple `#7B4FD4` → mid `#9B6FE8` → light `#C4AAFF`
 
 ## Architecture
-- **Public marketing site** at `/` (Landing) + `/pricing` — pre-launch with waitlist + Founder Circle
-- **App** at `/login`, `/register`, `/legal`, `/dashboard`, `/projects/*`, `/clients`, `/invoices`, `/editor`, `/community`, `/profile`
-- **CEO Back Office** at `/ceo` — standalone admin shell with sidebar
-- Backend: FastAPI + Motor (MongoDB) at `/api/*`, JWT Bearer (7-day) in localStorage
-- Frontend: React 19 + React Router 7 + axios + lucide-react
-- Fonts: **DM Sans + DM Mono + Playfair Display**
-- Color palette (official): purple #7B4FD4 / purple-mid #9B6FE8 / purple-light #C4AAFF / teal #0F9B7A / coral #C44B2A / amber #C4891A
+- **Public site** (no auth): `/`, `/pricing`, `/founder-checkout`, `/login`, `/register`, `/forgot-password`, `/reset-password`
+- **App** (auth + legal-accepted): `/dashboard`, `/projects/*`, `/clients`, `/invoices`, `/editor`, `/community`, `/profile`, `/sparks`
+- **CEO** (role=ceo, no app layout): `/ceo`
+- **Catch-all**: `/*` → `NotFound`
 
-## What's been implemented
+## Implemented (v1 → v2 → v3 cumulative)
 
-### Public marketing (v2 — official designs)
-- **Landing** (`/`): Hero with Playfair headline + waitlist + 3 orbs animation, stats bar, pain points list, 6-feature grid, 8-platform export grid, 4-audience cards, Survey card linking to https://reellabcreatorsurvey.netlify.app, Founder Circle form, bottom CTA, footer. Public Help Bot floating bubble with FAQ matching.
-- **Pricing** (`/pricing`): Monthly/Yearly toggle (21% saving), 3 plan cards (Solo $19, Creator $49, Studio $199), add-ons grid. Reads live pricing from backend so CEO updates reflect instantly.
+### Public marketing
+- Landing with hero (Playfair), waitlist form (saves to MongoDB), Founder Circle form (routes to paid checkout), Survey link, 8-platform export grid, 4-audience cards, public AI Help Bot
+- Pricing page (3 tiers, monthly/yearly toggle, live data from `/api/pricing`)
+- **Founder Checkout (v3)** — official paid design: $1 + lifetime status + first month Creator free → $49/mo after. Stripe-form layout with full validation. MOCKED in dev (warning banner shows).
+- **404 page (v3)** — Playfair "doesn't exist" with Take me home / View pricing / Email support
 
-### App (existing, palette refreshed)
-- Login / Register / Legal Gate (now with **collapsible doc cards** matching official onboarding HTML)
-- Dashboard, Projects (+ 5-step wizard, detail with 5 tabs), Clients, Invoices, AI Editor (Screen 24), Community (feed + members + 1-star/day), Profile
+### Auth + onboarding
+- Register / Login (JWT Bearer in localStorage, 7-day expiry)
+- **Forgot Password + Reset Password (v3)** — email-based, 30-min token, dev_reset_link returned when SMTP not configured
+- Legal Gate with 3 collapsible doc cards (Terms / Code of Conduct / ToS), pulse-animated continue CTA
+- Onboarding tour (7-step modal, dismiss on backdrop click)
 
-### CEO Back Office (rebuilt, 11 sections)
-Sidebar navigation, standalone admin shell (no app top nav):
-1. **Platform Overview** — 4 metric cards + recent activity feed + quick actions
-2. **Activity Log** — full chronological feed
-3. **User Management** — table with badge & status dropdowns, delete (non-CEO)
-4. **All Projects** — override modal with required note + audit logging
-5. **Pricing & Plans** — editable monthly/yearly per tier, "Sync to Stripe" (MOCKED button)
-6. **Waitlist** — table of signups + CSV export
-7. **Founder Circle** — applications with type/handle
-8. **Dummy Data** — seed/clear demo clients & projects
-9. **FAQ Editor** — full CRUD with category, question, answer, keywords
-10. **Email Templates** — editable subject/body for welcome / invoice_paid / project_delivered / founder_welcome
-11. **Affiliates & Badges** — blue/gold badge assignment with counts
-12. **Moderation** — flagged content queue with dismiss/warn/remove/suspend actions
-13. **Platform Settings** — 6 toggles (new_signups, maintenance, community, affiliates, dummy_data, email_notifications)
+### App
+- Dashboard (stats + quick actions + recent projects + onboarding tour for new users)
+- Projects (list, 5-step wizard, detail w/ 5 tabs: Deliverables / Messages / Checklist / Invoices / Team)
+- Clients (CRUD), Invoices (line items + mock pay button)
+- **AI Editor (Screen 24)** — faithful replica: AI clips panel (8 deterministic preset moments), preview canvas (aspect-aware), 9-tool toolbar (Trim/Speed/Resize/Filters/FX/Text/Transitions/Audio/**AI Edit**), video/audio/text timeline tracks, properties panel (Clip/Export tabs)
+- Community (feed + members + 1-star/day, +10 pts each)
+- Profile (display name / handle / company / bio / social handles / theme persistence)
+- **Sparks / Affiliate Hub (v3)** — "Your Constellation" branding. Referral link with copy-to-clipboard (now has try/catch + execCommand fallback). 4 stat cards. 12-month commission bar chart. Period toggle (monthly/quarterly/annual). Sparks table with status (active/cancelled).
 
-### Backend endpoints (additions in v2)
-- `POST /api/waitlist` — public
-- `POST /api/founder-circle` — public
-- `GET /api/pricing` — public (live data drives /pricing page)
-- `GET /api/public/faq` — public
-- `GET/PATCH/DELETE /api/ceo/users` — admin
-- `GET /api/ceo/waitlist`, `/api/ceo/founders`
-- `GET/POST/PATCH/DELETE /api/ceo/faq` — full CRUD
-- `PUT /api/ceo/pricing`, `POST /api/ceo/pricing/sync-stripe` (mocked)
-- `GET/PUT /api/ceo/settings` — platform toggles
-- `GET/PUT /api/ceo/email-templates`
-- `POST /api/community/flag`, `GET/POST /api/ceo/moderation/*`
-- `POST /api/ceo/dummy-data/seed`, `DELETE /api/ceo/dummy-data`
+### CEO Back Office (13 sections)
+Platform Overview · Activity Log · User Management · All Projects (with override + audit) · Pricing & Plans (editable + Sync-to-Stripe button) · Waitlist · Founder Circle applications · Dummy Data · FAQ Editor · Email Templates · Affiliates & Badges · Moderation · Platform Settings (6 toggles)
 
-### Startup seeding
-- CEO auto-seeded (`ceo@reellabstudio.com` / `ReelLabceo26!`), password syncs from `.env`
-- Default pricing, platform settings, email templates seeded if missing
-- FAQ seeded from in-code list if FAQ collection is empty
+### Backend endpoints (66 total, all behind /api)
+- Auth: register / login / me / legal-accept / profile / **password-reset/request** / **password-reset/confirm**
+- Clients & Projects: full CRUD + messages + checklist
+- AI editor: upload / process / projects / timeline / auto-edit
+- Invoices: list / create / status / pay (mocked)
+- Community: posts / likes / comments / members / stars / flag
+- Help: faq / query / public/help/query / public/contact-emails
+- **Stripe (v3)**: payments/checkout / payments/status / payments/mock-complete / webhook/stripe
+- Public: waitlist / founder-circle / pricing / public/faq
+- **Affiliate (v3)**: affiliate/me / affiliate/lookup/{code}
+- CEO admin: overview / activity / users / projects / pricing / settings / email-templates / faq / waitlist / founders / payments / affiliates-overview / moderation / dummy-data / override / badge
 
-## MOCKED (clearly indicated to users)
-- Stripe payments (invoice "Mark Paid" button + AI upload payment modal + CEO "Sync to Stripe" button)
-- Real AI video processing (deterministic 8-clip generator)
+### Integrations & background
+- **Stripe**: scaffolded via `emergentintegrations.payments.stripe.checkout.StripeCheckout`. `STRIPE_MODE=mock` in dev. End-to-end flow tested: checkout → status polling → auto-finalize on first poll → affiliate commission record created when ref code present. Webhook handler returns 200 in mock mode, processes real events in live mode.
+- **SMTP**: `smtplib` with STARTTLS. Google Workspace ready. Falls back to logging when SMTP_HOST unset.
+- **Referral capture**: `<RefCapture />` in App.js stores `?ref=CODE` in `localStorage.rl_ref` (JSON `{code, ts}`).
+
+## Test coverage
+- Iteration 1: 25/25 backend, frontend critical flows passed
+- Iteration 2: 17 new endpoints, 100% backend (42/42 total)
+- Iteration 3: 17 new endpoints, **100% backend (59/59 total), 100% frontend testid coverage**
+
+## MOCKED in dev (clearly indicated; live in production)
+- Stripe charges (all flows — toggle via `STRIPE_MODE=live`)
+- SMTP email (toggle via setting `SMTP_HOST`)
+- AI video processing (preset 8-clip generator — will need real Replicate/Whisper integration)
 - Video export (toast only)
 
-## Backlog / post-deploy
-- Wire real Stripe (CEO has UI ready, just needs keys in `backend/.env` at deploy)
-- Real AI moment detection (Replicate / Whisper + LLM scoring) — UI is already there
-- Cloudflare DNS / domain wiring at deploy
-- Direct messages, push notifications
-- Pre-production toolkit (Brief / Shot List / Call Sheet)
-- Team invite UI per project
+## Deployment artifacts
+- `/app/memory/DEPLOYMENT.md` — Stripe + Cloudflare DNS + Google Workspace SMTP cheatsheet
+- `/app/memory/test_credentials.md` — CEO creds + test flow notes
 
-## Key files
-- `/app/backend/server.py` — single-file backend, all endpoints
-- `/app/frontend/src/App.js` — router
-- `/app/frontend/src/pages/Landing.jsx` — official marketing landing
-- `/app/frontend/src/pages/Pricing.jsx` — pricing page (live from /api/pricing)
-- `/app/frontend/src/pages/LegalGate.jsx` — collapsible 3-doc gate
-- `/app/frontend/src/pages/CEOBackOffice.jsx` — full 13-section admin
-- `/app/frontend/src/pages/AIEditor.jsx` — Screen 24 editor
-- `/app/frontend/src/components/HelpBotPublic.jsx` — public help bot (no auth)
-- `/app/frontend/src/index.css` — design tokens (official palette + Playfair)
-- `/app/frontend/src/reellab.css` — all page-level styles
+## Backlog (post-deploy, beyond first 90 days)
+- Real AI moment detection (Replicate / Whisper + LLM scoring) — UI already there
+- Direct messages, push notifications
+- Pre-production toolkit (Brief / Shot List / Call Sheet generators)
+- Team invite UI per project
+- Affiliate payout automation via Stripe Connect (currently manual after $25)
+- Mobile native apps

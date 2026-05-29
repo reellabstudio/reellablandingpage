@@ -15,7 +15,32 @@ export default function AffiliateHub() {
     api.get("/affiliate/me").then((r) => setData(r.data));
   }, []);
 
-  const copy = (val, label) => { navigator.clipboard.writeText(val); showToast(`${label} copied`); };
+  const copy = (val, label) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val).then(() => showToast(`${label} copied`)).catch(() => fallbackCopy(val, label));
+      } else {
+        fallbackCopy(val, label);
+      }
+    } catch {
+      fallbackCopy(val, label);
+    }
+  };
+  const fallbackCopy = (val, label) => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = val;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      showToast(`${label} copied`);
+    } catch {
+      showToast(`Couldn't copy — please copy manually`);
+    }
+  };
 
   if (!data) return <div className="page-shell"><div className="spinner" /></div>;
 
@@ -73,8 +98,8 @@ export default function AffiliateHub() {
       <div className="card" style={{ marginBottom: 24 }} data-testid="commission-chart-card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
           <div>
-            <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-dim)", marginBottom: 4 }}>{periodLabel[period]}</div>
-            <div style={{ fontSize: 28, fontWeight: 600, color: "var(--teal)" }}>${(periodMap[period] || 0).toFixed(2)}</div>
+            <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-dim)", marginBottom: 4 }} data-testid="period-label">{periodLabel[period]}</div>
+            <div style={{ fontSize: 28, fontWeight: 600, color: "var(--teal)" }} data-testid="period-amount">${(periodMap[period] || 0).toFixed(2)}</div>
           </div>
           <div style={{ display: "flex", gap: 4, background: "var(--surface2)", borderRadius: 8, padding: 4 }}>
             {["monthly", "quarterly", "annual"].map((p) => (

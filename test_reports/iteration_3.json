@@ -1,0 +1,31 @@
+{
+  "summary": "v3 deployment-readiness pass. Backend: 17/17 pytest tests pass — Stripe mocked checkout (founder/creator/studio), session status auto-finalize, mock-complete endpoint, webhook 200, affiliate /me + /lookup, end-to-end founder+referral creates affiliate_referral, creator_monthly @ ref creates commission with 7.35 (49*0.15), password reset full flow (request -> dev_reset_link -> confirm -> login w/new pw -> token reuse rejected), unknown email no-leak, /public/contact-emails, /public/help/query, /ceo/payments (403 for non-CEO, no _id leak), /ceo/affiliates-overview. Frontend: /founder-checkout renders headline & form & success, /forgot-password->dev_reset_link->/reset-password->success->redirect /login flow works, /reset-password updates password (verified login with new pw 200), /this-page-does-not-exist shows NotFound with 3 CTA testids, /sparks renders all 12 testids (stat cards, referral-link-card, copy-link, chart, period toggles, sparks-list, Your Constellation header), nav-sparks visible after legal acceptance, ?ref=TESTCODE persists rl_ref in localStorage as JSON {code,ts}, referrer-banner shows on /founder-checkout?ref=VALIDCODE.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AffiliateHub copy-link button", "issue": "navigator.clipboard.writeText throws NotAllowedError in some environments (Playwright/embedded iframes/HTTP) and is not wrapped in try/catch — surfaces a full-page red 'Uncaught runtime errors' overlay in dev. Should fall back to document.execCommand or silently catch.", "selector": "[data-testid='copy-link']", "priority": "MEDIUM"},
+      {"component": "AffiliateHub period toggle", "issue": "Clicking period-monthly/period-quarterly/period-annual does not change the value rendered inside stat-mtd card (label stays 'THIS MONTH/MTD/$0.00' for all 3 periods). If the toggle is intended only to redraw the chart, that is fine; otherwise stat-mtd should reflect QTD/YTD when toggled. With $0 for new user this could not be fully validated.", "selector": "[data-testid='period-quarterly'] / [data-testid='stat-mtd']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/backend_test_v3.py", "/app/test_reports/pytest/pytest_v3.xml"],
+  "action_items": [
+    "Wrap navigator.clipboard.writeText in try/catch on copy-link (and copy-code) to prevent runtime error overlay when clipboard API is unavailable; also add a fallback (document.execCommand('copy') on a hidden input).",
+    "Confirm whether period toggle is supposed to update the stat-mtd card text; if yes, wire it. If toggle is chart-only, consider renaming testid expectation."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 1778 lines — recommend modular split (routers/payments.py, routers/affiliate.py, routers/auth_reset.py).",
+    "/payments/status/{sid} auto-finalizes mocked sessions on first poll, which doubles as a side-effect endpoint — fine for mock but document clearly so production Stripe flow (STRIPE_MODE!=mock) isn't accidentally hit by status polling.",
+    "Password reset endpoint correctly returns ok+no dev_reset_link for unknown email (no enumeration leak). Token reuse is rejected with 400. Good.",
+    "CEO endpoints properly excluded mongodb _id from responses (verified)."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test_v3.py"],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% testid coverage; 2 minor UX bugs noted"},
+  "test_credentials": "CEO ceo@reellabstudio.com / ReelLabceo26!. Fresh users registered with TEST_* prefix during tests; passwords vary (OrigPass123!, NewPassXYZ1! etc).",
+  "seed_data_creation": "Multiple TEST_v3_*, TEST_fp_*, TEST_sp*_*, TEST_aff*_*, TEST_ccomm_*, TEST_fpaid_*, TEST_fchk_*, TEST_pstat_*, TEST_mc_* test users + payment_transactions + affiliate_referrals + affiliate_commissions rows inserted via tests.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v3 backend tests live at /app/backend/tests/backend_test_v3.py (17 tests, all pass against REACT_APP_BACKEND_URL). Frontend ref-capture stores localStorage 'rl_ref' as JSON {code, ts} (not raw string). After fresh registration user lands on /legal — must call POST /api/auth/legal-accept with {terms:true, code_of_conduct:true, tos:true} before nav-sparks renders. Founder Checkout headline is split into 3 lines: 'One dollar.' / 'Founder status.' / 'First month free.' Clipboard write fails in headless Playwright — verify Copy button manually in real browser.",
+  "rca of the issue": "N/A — no blocking bugs. Only 2 minor frontend polish items (clipboard error handling, period toggle clarification)."
+}

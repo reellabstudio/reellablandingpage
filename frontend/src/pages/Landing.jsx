@@ -86,39 +86,20 @@ function WaitlistForm({ tag, btnText = "Join Waitlist" }) {
 }
 
 function FounderForm() {
+  const navigate = useNavigate();
   const [form, setForm] = useState({ name: "", email: "", creator_type: "", handle: "" });
-  const [done, setDone] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const submit = async () => {
-    setErr("");
-    if (!form.name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      setErr("Please enter your name and a valid email.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await api.post("/founder-circle", form);
-      setDone(true);
-    } catch (e) {
-      setErr(formatErr(e.response?.data?.detail) || "Something went wrong.");
-    }
-    setBusy(false);
+  const submit = () => {
+    // Push selection into checkout via query params + localStorage
+    sessionStorage.setItem("rl_founder_prefill", JSON.stringify(form));
+    const refData = localStorage.getItem("rl_ref");
+    const ref = refData ? JSON.parse(refData).code : "";
+    navigate(`/founder-checkout${ref ? `?ref=${ref}` : ""}`);
   };
 
-  if (done) {
-    return (
-      <div className="founder-form-card" style={{ textAlign: "center" }} data-testid="founder-success">
-        <div style={{ width: 52, height: 52, background: "var(--purple-glow)", border: "1px solid var(--purple-border)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 16px" }}>✦</div>
-        <strong style={{ fontSize: 17, display: "block", marginBottom: 6 }}>Welcome to the Founder Circle.</strong>
-        <p style={{ fontSize: 13, color: "var(--text-sec)", fontWeight: 300 }}>You're in. We'll be reaching out personally when it's your time.</p>
-      </div>
-    );
-  }
   return (
     <div className="founder-form-card" data-testid="founder-form">
       <h3>Claim your spot</h3>
-      <p className="sub">Limited founding member spots available.</p>
+      <p className="sub">$1 today · First month of Creator free · Lifetime Founder status.</p>
       <div style={{ marginBottom: 12 }}>
         <label className="label">First Name</label>
         <input className="input" placeholder="Your name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="founder-name" />
@@ -139,10 +120,10 @@ function FounderForm() {
         <label className="label">@ Handle (optional)</label>
         <input className="input" placeholder="@yourusername" value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value })} data-testid="founder-handle" />
       </div>
-      <button onClick={submit} disabled={busy} style={{ width: "100%", padding: 12, borderRadius: 8, border: "none", background: "linear-gradient(135deg, var(--purple), var(--purple-mid))", color: "#fff", fontSize: 14, fontWeight: 500, cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.6 : 1 }} data-testid="founder-submit">
-        {busy ? "Securing your spot…" : "Join the Founder Circle →"}
+      <button onClick={submit} style={{ width: "100%", padding: 12, borderRadius: 8, border: "none", background: "linear-gradient(135deg, var(--purple), var(--purple-mid))", color: "#fff", fontSize: 14, fontWeight: 500, cursor: "pointer" }} data-testid="founder-submit">
+        Continue to checkout · $1 →
       </button>
-      {err && <p style={{ fontSize: 12, color: "#E07070", marginTop: 8 }} data-testid="founder-error">{err}</p>}
+      <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 10, textAlign: "center" }}>Secured by Stripe · 256-bit SSL</p>
     </div>
   );
 }

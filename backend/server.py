@@ -9,16 +9,29 @@ import os
 import uuid
 import logging
 import random
+import secrets
+import smtplib
 import bcrypt
 import jwt as pyjwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
+
+# Stripe via emergentintegrations
+try:
+    from emergentintegrations.payments.stripe.checkout import (
+        StripeCheckout, CheckoutSessionRequest,
+    )
+    STRIPE_AVAILABLE = True
+except Exception:
+    STRIPE_AVAILABLE = False
 
 # ---------- Config & DB ----------
 JWT_SECRET = os.environ["JWT_SECRET"]
@@ -295,7 +308,104 @@ DEFAULT_EMAILS = {
     "invoice_paid": {"subject": "Payment received — {{invoice_number}}", "body": "Hi {{name}},\n\nWe've received your payment of ${{amount}} for {{invoice_number}}. Thank you!\n\n— ReelLab"},
     "project_delivered": {"subject": "Your project is delivered 🎬", "body": "Hi {{name}},\n\nYour project '{{project_name}}' is ready for review.\n\n— ReelLab"},
     "founder_welcome": {"subject": "Welcome to the Founder Circle", "body": "Hi {{name}},\n\nYou're officially part of the ReelLab Founder Circle. We'll be in touch personally with early access details.\n\n— The Founders"},
+    "password_reset": {"subject": "Reset your ReelLab password", "body": "Hi {{name}},\n\nYou requested a password reset. Click the link below to set a new password. This link expires in 30 minutes.\n\n{{reset_link}}\n\nIf you didn't request this, ignore this email.\n\n— ReelLab Support"},
 }
+
+
+# Stripe pricing (server-defined — never trust client)
+STRIPE_PACKAGES = {
+    "founder_circle": {"amount": 1.00, "label": "Founder Circle Membership", "description": "Lifetime status · first month of Creator free"},
+    "creator_monthly": {"amount": 49.00, "label": "Creator Plan · Monthly"},
+    "creator_yearly": {"amount": 468.00, "label": "Creator Plan · Yearly"},
+    "studio_monthly": {"amount": 199.00, "label": "Studio Plan · Monthly"},
+    "studio_yearly": {"amount": 1908.00, "label": "Studio Plan · Yearly"},
+    "ai_processing": {"amount": 19.00, "label": "AI Video Processing"},
+}
+
+# Affiliate commission rates
+COMMISSION_RATES = {"creator": 0.15, "studio": 0.30}
+
+
+def get_stripe() -> Optional[StripeCheckout]:
+    """Returns a configured StripeCheckout instance, or None if not available."""
+    if not STRIPE_AVAILABLE:
+        return None
+    api_key = os.environ.get("STRIPE_API_KEY", "")
+    if not api_key:
+        return None
+    return StripeCheckout(api_key=api_key, webhook_url="")  # webhook_url overridden per-call
+
+
+def stripe_mock_mode() -> bool:
+    """True when STRIPE_MODE=mock or STRIPE_API_KEY is the emergent placeholder."""
+    mode = os.environ.get("STRIPE_MODE", "mock").lower()
+    api_key = os.environ.get("STRIPE_API_KEY", "")
+    return mode == "mock" or api_key in ("", "sk_test_emergent")
+
+
+async def send_email(to_email: str, subject: str, body: str, html_body: Optional[str] = None) -> bool:
+    """Send email via SMTP if configured, else log + return True (dev mode)."""
+    smtp_host = os.environ.get("SMTP_HOST", "")
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASSWORD", "")
+    from_email = os.environ.get("SMTP_FROM_EMAIL", "support@reellabstudio.com")
+    from_name = os.environ.get("SMTP_FROM_NAME", "ReelLab Support")
+
+    if not smtp_host or not smtp_user or not smtp_pass:
+        logger.info(f"[EMAIL MOCKED] To: {to_email} | Subject: {subject}\nBody:\n{body}")
+        return True
+
+    try:
+        port = int(os.environ.get("SMTP_PORT", "587"))
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{from_name} <{from_email}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText(body, "plain"))
+        if html_body:
+            msg.attach(MIMEText(html_body, "html"))
+        with smtplib.SMTP(smtp_host, port, timeout=10) as s:
+            s.starttls()
+            s.login(smtp_user, smtp_pass)
+            s.sendmail(from_email, [to_email], msg.as_string())
+        return True
+    except Exception as e:
+        logger.error(f"SMTP send failed: {e}")
+        return False
+
+
+def render_template(template_str: str, vars: dict) -> str:
+    out = template_str
+    for k, v in vars.items():
+        out = out.replace("{{" + k + "}}", str(v))
+    return out
+
+
+def make_referral_code(user_id: str) -> str:
+    """Stable 6-char referral code derived from user_id."""
+    import hashlib
+    h = hashlib.sha256(user_id.encode()).hexdigest()[:6].upper()
+    return h
+
+
+# ─── Additional Models ───
+class CheckoutInitIn(BaseModel):
+    package_id: Literal["founder_circle", "creator_monthly", "creator_yearly", "studio_monthly", "studio_yearly", "ai_processing"]
+    origin_url: str
+    name: Optional[str] = ""
+    email: Optional[EmailStr] = None
+    creator_type: Optional[str] = ""
+    handle: Optional[str] = ""
+    referral_code: Optional[str] = ""
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=6)
 
 
 # ---------- Auth ----------
@@ -1164,6 +1274,412 @@ async def ceo_clear_dummy(user: dict = Depends(require_ceo)):
 
 
 # ---------- Startup ----------
+# ─── Stripe / Payments ───
+@api.post("/payments/checkout")
+async def create_checkout(body: CheckoutInitIn, request: Request):
+    if body.package_id not in STRIPE_PACKAGES:
+        raise HTTPException(status_code=400, detail="Invalid package")
+    pkg = STRIPE_PACKAGES[body.package_id]
+    amount = float(pkg["amount"])
+
+    # Build URLs from frontend's origin (never hardcode)
+    origin = body.origin_url.rstrip("/")
+    success_url = f"{origin}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}&pkg={body.package_id}"
+    cancel_url = f"{origin}/checkout/cancel?pkg={body.package_id}"
+
+    metadata = {
+        "package_id": body.package_id,
+        "email": body.email or "",
+        "name": body.name or "",
+        "creator_type": body.creator_type or "",
+        "handle": body.handle or "",
+        "referral_code": body.referral_code or "",
+    }
+
+    tx_id = str(uuid.uuid4())
+
+    if stripe_mock_mode():
+        # Mocked: skip Stripe entirely, mark as 'pending' with a fake session id
+        fake_session = f"cs_mock_{tx_id[:12]}"
+        await db.payment_transactions.insert_one({
+            "id": tx_id,
+            "session_id": fake_session,
+            "package_id": body.package_id,
+            "amount": amount,
+            "currency": "usd",
+            "payment_status": "pending",
+            "metadata": metadata,
+            "mocked": True,
+            "created_at": now_iso(),
+        })
+        # Return a synthetic checkout page on our own site
+        return {"url": f"{origin}/checkout/mock?session_id={fake_session}&pkg={body.package_id}", "session_id": fake_session, "mocked": True}
+
+    # Live Stripe path
+    stripe = get_stripe()
+    if not stripe:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+    host_url = str(request.base_url)
+    stripe.webhook_url = f"{host_url}api/webhook/stripe"
+
+    req = CheckoutSessionRequest(amount=amount, currency="usd", success_url=success_url, cancel_url=cancel_url, metadata=metadata)
+    session = await stripe.create_checkout_session(req)
+    await db.payment_transactions.insert_one({
+        "id": tx_id,
+        "session_id": session.session_id,
+        "package_id": body.package_id,
+        "amount": amount,
+        "currency": "usd",
+        "payment_status": "pending",
+        "metadata": metadata,
+        "mocked": False,
+        "created_at": now_iso(),
+    })
+    return {"url": session.url, "session_id": session.session_id, "mocked": False}
+
+
+@api.get("/payments/status/{session_id}")
+async def payment_status(session_id: str):
+    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # If already finalized, return
+    if tx["payment_status"] in ("paid", "expired", "failed"):
+        return {"payment_status": tx["payment_status"], "status": tx["payment_status"], "amount": tx["amount"], "currency": tx["currency"], "metadata": tx.get("metadata", {})}
+
+    if tx.get("mocked"):
+        # Mocked: simulate paid status after first poll
+        await _finalize_payment(tx, "paid")
+        return {"payment_status": "paid", "status": "complete", "amount": tx["amount"], "currency": tx["currency"], "metadata": tx.get("metadata", {})}
+
+    # Live Stripe path
+    stripe = get_stripe()
+    if not stripe:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+    cs = await stripe.get_checkout_status(session_id)
+    if cs.payment_status == "paid":
+        await _finalize_payment(tx, "paid")
+    return {"payment_status": cs.payment_status, "status": cs.status, "amount": cs.amount_total / 100, "currency": cs.currency, "metadata": cs.metadata}
+
+
+@api.post("/payments/mock-complete/{session_id}")
+async def mock_complete_payment(session_id: str):
+    """DEV only — instantly mark a mocked session as paid (used by /checkout/mock page)."""
+    tx = await db.payment_transactions.find_one({"session_id": session_id})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not tx.get("mocked"):
+        raise HTTPException(status_code=400, detail="Not a mocked transaction")
+    if tx["payment_status"] != "paid":
+        await _finalize_payment(tx, "paid")
+    return {"ok": True}
+
+
+async def _finalize_payment(tx: dict, new_status: str):
+    """Idempotent finalization — safe to call multiple times."""
+    if tx["payment_status"] == "paid":
+        return
+    await db.payment_transactions.update_one(
+        {"id": tx["id"]},
+        {"$set": {"payment_status": new_status, "completed_at": now_iso()}},
+    )
+    if new_status != "paid":
+        return
+
+    meta = tx.get("metadata", {})
+    pkg_id = tx["package_id"]
+    email = (meta.get("email") or "").lower().strip()
+
+    # Founder Circle: create founder record + first-month-free flag
+    if pkg_id == "founder_circle":
+        await db.founders.update_one(
+            {"email": email},
+            {"$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "name": meta.get("name", ""),
+                "email": email,
+                "creator_type": meta.get("creator_type", ""),
+                "handle": meta.get("handle", ""),
+                "joined_at": now_iso(),
+                "status": "founder",
+                "paid": True,
+                "first_month_free": True,
+            }},
+            upsert=True,
+        )
+        # If user exists, mark them as founder + studio_owner with locked Creator pricing
+        user = await db.users.find_one({"email": email}) if email else None
+        if user:
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$set": {"is_founder": True, "founder_locked_price": True, "plan": "creator"}},
+            )
+        await db.activity_log.insert_one({
+            "id": str(uuid.uuid4()),
+            "type": "purple",
+            "text": f"<strong>{meta.get('name', email)}</strong> joined the Founder Circle (paid $1)",
+            "at": now_iso(),
+        })
+
+        # Affiliate commission tracking — Founder doesn't generate commission yet,
+        # but record referral for when they upgrade to Creator (month 2+).
+        ref_code = meta.get("referral_code", "")
+        if ref_code:
+            await db.affiliate_referrals.insert_one({
+                "id": str(uuid.uuid4()),
+                "referral_code": ref_code,
+                "referred_email": email,
+                "referred_name": meta.get("name", ""),
+                "package_id": pkg_id,
+                "status": "active",  # active | cancelled
+                "plan_type": "founder",  # founder | creator | studio
+                "created_at": now_iso(),
+            })
+
+    # Recurring subscription commission tracking
+    elif pkg_id.startswith(("creator_", "studio_")):
+        plan = "creator" if pkg_id.startswith("creator_") else "studio"
+        ref_code = meta.get("referral_code", "")
+        if ref_code:
+            commission_rate = COMMISSION_RATES[plan]
+            commission_amount = tx["amount"] * commission_rate
+            await db.affiliate_referrals.update_one(
+                {"referral_code": ref_code, "referred_email": email},
+                {"$set": {"status": "active", "plan_type": plan}, "$setOnInsert": {
+                    "id": str(uuid.uuid4()),
+                    "referral_code": ref_code,
+                    "referred_email": email,
+                    "referred_name": meta.get("name", ""),
+                    "package_id": pkg_id,
+                    "created_at": now_iso(),
+                }},
+                upsert=True,
+            )
+            await db.affiliate_commissions.insert_one({
+                "id": str(uuid.uuid4()),
+                "referral_code": ref_code,
+                "referred_email": email,
+                "plan": plan,
+                "amount": commission_amount,
+                "rate": commission_rate,
+                "package_id": pkg_id,
+                "transaction_id": tx["id"],
+                "earned_at": now_iso(),
+            })
+
+    # Welcome email
+    if email:
+        tpl = (await db.settings.find_one({"key": "email_templates"}) or {}).get("value", DEFAULT_EMAILS)
+        key = "founder_welcome" if pkg_id == "founder_circle" else "welcome"
+        t = tpl.get(key, DEFAULT_EMAILS[key])
+        await send_email(
+            email,
+            render_template(t["subject"], {"name": meta.get("name", "")}),
+            render_template(t["body"], {"name": meta.get("name", "")}),
+        )
+
+
+@api.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    """Stripe webhook handler — only active when STRIPE_MODE != mock."""
+    if stripe_mock_mode():
+        return {"ok": True, "mocked": True}
+
+    stripe = get_stripe()
+    if not stripe:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature", "")
+    try:
+        resp = await stripe.handle_webhook(body, sig)
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid webhook")
+
+    if resp.event_type in ("checkout.session.completed", "payment_intent.succeeded"):
+        tx = await db.payment_transactions.find_one({"session_id": resp.session_id})
+        if tx:
+            await _finalize_payment(tx, "paid")
+    elif resp.event_type in ("customer.subscription.deleted",):
+        # Mark affiliate referral as cancelled
+        email = (resp.metadata or {}).get("email", "").lower()
+        if email:
+            await db.affiliate_referrals.update_many({"referred_email": email}, {"$set": {"status": "cancelled", "cancelled_at": now_iso()}})
+    return {"ok": True}
+
+
+# ─── Affiliate / Sparks ───
+@api.get("/affiliate/me")
+async def my_affiliate(user: dict = Depends(get_current_user)):
+    """Returns my affiliate code + my Sparks + commission breakdown."""
+    code = make_referral_code(user["id"])
+    referrals = await db.affiliate_referrals.find({"referral_code": code}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    commissions = await db.affiliate_commissions.find({"referral_code": code}, {"_id": 0}).sort("earned_at", -1).to_list(2000)
+
+    active_sparks = sum(1 for r in referrals if r.get("status") == "active")
+    cancelled_sparks = sum(1 for r in referrals if r.get("status") == "cancelled")
+
+    total_earned = sum(c["amount"] for c in commissions)
+    # MTD / Quarter / Year breakdowns
+    today = now_utc()
+    month_start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    quarter_start_month = ((today.month - 1) // 3) * 3 + 1
+    quarter_start = today.replace(month=quarter_start_month, day=1, hour=0, minute=0, second=0, microsecond=0)
+    year_start = today.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    def in_range(c, start):
+        try:
+            d = datetime.fromisoformat(c["earned_at"].replace("Z", "+00:00"))
+            return d >= start
+        except Exception:
+            return False
+
+    mtd = sum(c["amount"] for c in commissions if in_range(c, month_start))
+    qtd = sum(c["amount"] for c in commissions if in_range(c, quarter_start))
+    ytd = sum(c["amount"] for c in commissions if in_range(c, year_start))
+
+    # Monthly series for last 12 months
+    months = []
+    for i in range(11, -1, -1):
+        m_date = (today.replace(day=1) - timedelta(days=30 * i)).replace(day=1)
+        m_label = m_date.strftime("%b %y")
+        m_total = 0
+        for c in commissions:
+            try:
+                d = datetime.fromisoformat(c["earned_at"].replace("Z", "+00:00"))
+                if d.year == m_date.year and d.month == m_date.month:
+                    m_total += c["amount"]
+            except Exception:
+                pass
+        months.append({"month": m_label, "amount": round(m_total, 2)})
+
+    return {
+        "referral_code": code,
+        "referral_link": f"https://reellabstudio.com/?ref={code}",
+        "sparks": referrals,
+        "active_sparks": active_sparks,
+        "cancelled_sparks": cancelled_sparks,
+        "total_earned": round(total_earned, 2),
+        "mtd": round(mtd, 2),
+        "qtd": round(qtd, 2),
+        "ytd": round(ytd, 2),
+        "monthly_series": months,
+        "commission_rates": COMMISSION_RATES,
+    }
+
+
+@api.get("/affiliate/lookup/{code}")
+async def lookup_referrer(code: str):
+    """Public — used by referral landing pages to confirm a code is valid + show who referred you."""
+    # Find user with this code
+    code = code.upper()
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(2000)
+    for u in users:
+        if make_referral_code(u["id"]) == code:
+            return {"valid": True, "referrer_name": u.get("display_name", "A ReelLab member"), "code": code}
+    return {"valid": False}
+
+
+# ─── Password Reset (internal email-based) ───
+@api.post("/auth/password-reset/request")
+async def request_password_reset(body: PasswordResetRequestIn, request: Request):
+    email = body.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    # Always return success — don't leak whether email exists
+    if user:
+        token = secrets.token_urlsafe(32)
+        expires = (now_utc() + timedelta(minutes=30)).isoformat()
+        await db.password_resets.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "email": email,
+            "token": token,
+            "expires_at": expires,
+            "used": False,
+            "created_at": now_iso(),
+        })
+        origin = request.headers.get("origin") or f"https://{os.environ.get('APP_DOMAIN', 'reellabstudio.com')}"
+        reset_link = f"{origin}/reset-password?token={token}"
+
+        tpl = (await db.settings.find_one({"key": "email_templates"}) or {}).get("value", DEFAULT_EMAILS)
+        t = tpl.get("password_reset", DEFAULT_EMAILS["password_reset"])
+        vars = {"name": user.get("display_name", ""), "reset_link": reset_link}
+        await send_email(email, render_template(t["subject"], vars), render_template(t["body"], vars))
+        logger.info(f"[RESET LINK for {email}] {reset_link}")
+        # In dev (no SMTP), expose the link to ease testing
+        if not os.environ.get("SMTP_HOST"):
+            return {"ok": True, "dev_reset_link": reset_link}
+    return {"ok": True}
+
+
+@api.post("/auth/password-reset/confirm")
+async def confirm_password_reset(body: PasswordResetConfirmIn):
+    rec = await db.password_resets.find_one({"token": body.token, "used": False})
+    if not rec:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    try:
+        expires = datetime.fromisoformat(rec["expires_at"].replace("Z", "+00:00"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid token")
+    if now_utc() > expires:
+        raise HTTPException(status_code=400, detail="Token expired")
+    await db.users.update_one({"id": rec["user_id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
+    await db.password_resets.update_one({"id": rec["id"]}, {"$set": {"used": True, "used_at": now_iso()}})
+    return {"ok": True}
+
+
+# ─── Public AI Help Bot (no auth) ───
+@api.post("/public/help/query")
+async def public_help_query(body: HelpQueryIn):
+    """Same as /help/query but no auth — for marketing site help bubble."""
+    return await help_query(body)
+
+
+# ─── Public emails ───
+@api.get("/public/contact-emails")
+async def public_emails():
+    return {
+        "hello": os.environ.get("HELLO_EMAIL", "hello@reellabstudio.com"),
+        "support": os.environ.get("SUPPORT_EMAIL", "support@reellabstudio.com"),
+        "sales": os.environ.get("SALES_EMAIL", "sales@reellabstudio.com"),
+        "ceo": os.environ.get("CEO_EMAIL", "ceo@reellabstudio.com"),
+    }
+
+
+# ─── CEO: payment transactions audit ───
+@api.get("/ceo/payments")
+async def ceo_payments(user: dict = Depends(require_ceo)):
+    rows = await db.payment_transactions.find({}, {"_id": 0}).sort("created_at", -1).limit(500).to_list(500)
+    return {"transactions": rows}
+
+
+@api.get("/ceo/affiliates-overview")
+async def ceo_affiliates_overview(user: dict = Depends(require_ceo)):
+    commissions = await db.affiliate_commissions.find({}, {"_id": 0}).to_list(5000)
+    referrals = await db.affiliate_referrals.find({}, {"_id": 0}).to_list(5000)
+    by_code = {}
+    for c in commissions:
+        by_code.setdefault(c["referral_code"], {"earned": 0.0, "count": 0})
+        by_code[c["referral_code"]]["earned"] += c["amount"]
+        by_code[c["referral_code"]]["count"] += 1
+    for r in referrals:
+        by_code.setdefault(r["referral_code"], {"earned": 0.0, "count": 0})
+    rows = []
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(2000)
+    name_by_code = {make_referral_code(u["id"]): u.get("display_name") or u["email"] for u in users}
+    for code, agg in by_code.items():
+        rows.append({
+            "referral_code": code,
+            "affiliate_name": name_by_code.get(code, "Unknown"),
+            "total_earned": round(agg["earned"], 2),
+            "commission_count": agg["count"],
+            "active_sparks": sum(1 for r in referrals if r["referral_code"] == code and r.get("status") == "active"),
+        })
+    return {"affiliates": rows, "total_paid": round(sum(c["amount"] for c in commissions), 2)}
+
+
 @app.on_event("startup")
 async def on_startup():
     # Indexes

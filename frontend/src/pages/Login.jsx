@@ -67,7 +67,10 @@ export default function Login() {
           </form>
 
           <div style={{ textAlign: "center", marginTop: 22, fontSize: 13, color: "var(--text-sec)" }}>
-            New to ReelLab? <Link to="/register" style={{ color: "var(--purple)", fontWeight: 500 }} data-testid="login-to-register">Create an account</Link>
+            <Link to="/forgot-password" style={{ color: "var(--purple-light)", fontSize: 12 }} data-testid="login-forgot">Forgot your password?</Link>
+            <div style={{ marginTop: 10 }}>
+              New to ReelLab? <Link to="/register" style={{ color: "var(--purple)", fontWeight: 500 }} data-testid="login-to-register">Create an account</Link>
+            </div>
           </div>
         </div>
       </div>

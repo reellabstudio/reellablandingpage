@@ -11,6 +11,7 @@ const TABS = [
   { to: "/editor", label: "AI Editor" },
   { to: "/invoices", label: "Invoices" },
   { to: "/community", label: "Community" },
+  { to: "/sparks", label: "Sparks" },
 ];
 
 export default function Layout({ children }) {

@@ -1,6 +1,7 @@
 import "./index.css";
 import "./reellab.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams, useLocation } from "react-router-dom";
+import { useEffect } from "react";
 import { AuthProvider, useAuth } from "./lib/auth";
 import Layout from "./components/Layout";
 import HelpBot from "./components/HelpBot";
@@ -19,6 +20,11 @@ import AIEditor from "./pages/AIEditor";
 import Community from "./pages/Community";
 import Profile from "./pages/Profile";
 import CEOBackOffice from "./pages/CEOBackOffice";
+import FounderCheckout from "./pages/FounderCheckout";
+import AffiliateHub from "./pages/AffiliateHub";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
+import NotFound from "./pages/NotFound";
 
 function Protected({ children, requireLegal = true }) {
   const { user } = useAuth();
@@ -52,15 +58,32 @@ function HelpBotWrapper({ children }) {
   );
 }
 
+// Capture ?ref=CODE on any page and stash in localStorage for 30 days
+function RefCapture() {
+  const location = useLocation();
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const ref = sp.get("ref");
+    if (ref) {
+      localStorage.setItem("rl_ref", JSON.stringify({ code: ref, ts: Date.now() }));
+    }
+  }, [location.search]);
+  return null;
+}
+
 function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <RefCapture />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/founder-checkout" element={<FounderCheckout />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/legal" element={<Protected requireLegal={false}><LegalGate /></Protected>} />
 
           <Route path="/dashboard" element={<Protected><AppShell><Dashboard /></AppShell></Protected>} />
@@ -73,9 +96,10 @@ function App() {
           <Route path="/editor" element={<Protected><AppShell><AIEditor /></AppShell></Protected>} />
           <Route path="/community" element={<Protected><AppShell><Community /></AppShell></Protected>} />
           <Route path="/profile" element={<Protected><AppShell><Profile /></AppShell></Protected>} />
+          <Route path="/sparks" element={<Protected><AppShell><AffiliateHub /></AppShell></Protected>} />
           <Route path="/ceo" element={<Protected requireLegal={false}><HelpBotWrapper><CEOBackOffice /></HelpBotWrapper></Protected>} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

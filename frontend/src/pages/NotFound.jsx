@@ -6,7 +6,7 @@ export default function NotFound() {
       <div className="orb orb-1"></div><div className="orb orb-2"></div>
       <div style={{ textAlign: "center", maxWidth: 520, position: "relative", zIndex: 1 }}>
         <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: "var(--purple-light)", letterSpacing: ".14em", textTransform: "uppercase", marginBottom: 18 }}>✦ Error 404</div>
-        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(3rem, 7vw, 5rem)", fontWeight: 400, lineHeight: 1.05, letterSpacing: "-0.02em", marginBottom: 18 }}>
+        <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(3rem, 7vw, 5rem)", fontWeight: 400, lineHeight: 1.05, letterSpacing: "-0.02em", marginBottom: 18, color: "var(--text)" }}>
           This page<br /><em style={{ color: "var(--purple-light)" }}>doesn't exist.</em>
         </h1>
         <p style={{ fontSize: 15, color: "var(--text-sec)", fontWeight: 300, lineHeight: 1.7, marginBottom: 32 }}>

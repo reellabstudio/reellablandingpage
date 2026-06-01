@@ -640,11 +640,11 @@ function ABTest() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
                 <div>
                   <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: ".1em" }}>Impressions</div>
-                  <div style={{ fontSize: 22, fontWeight: 500 }} data-testid={`abtest-${row.variant}-imps`}>{row.impressions}</div>
+                  <div style={{ fontSize: 22, fontWeight: 500, color: "var(--text)" }} data-testid={`abtest-${row.variant}-imps`}>{row.impressions}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: ".1em" }}>Conversions</div>
-                  <div style={{ fontSize: 22, fontWeight: 500 }} data-testid={`abtest-${row.variant}-conv`}>{row.conversions}</div>
+                  <div style={{ fontSize: 22, fontWeight: 500, color: "var(--text)" }} data-testid={`abtest-${row.variant}-conv`}>{row.conversions}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: ".1em" }}>Conversion rate</div>

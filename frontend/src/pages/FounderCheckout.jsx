@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api, { formatErr } from "../lib/api";
 
@@ -51,6 +51,7 @@ export default function FounderCheckout() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState(null);
+  const impressionFired = useRef(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
@@ -59,12 +60,15 @@ export default function FounderCheckout() {
     const v = (forceVariant === "a" || forceVariant === "b") ? forceVariant : pickVariant();
     setVariant(v);
 
-    // Record impression once per page load
-    api.post("/public/ab/impression", {
-      page: "founder-checkout",
-      variant: v,
-      referral_code: refCode,
-    }).catch(() => { /* non-blocking */ });
+    // Record impression once per page load (StrictMode-safe via useRef)
+    if (!impressionFired.current) {
+      impressionFired.current = true;
+      api.post("/public/ab/impression", {
+        page: "founder-checkout",
+        variant: v,
+        referral_code: refCode,
+      }).catch(() => { /* non-blocking */ });
+    }
 
     // Payment mode (live → hide card form, Stripe Checkout handles it)
     api.get("/public/payment-mode").then((r) => setPaymentLive(!!r.data?.stripe_live)).catch(() => {});

@@ -1717,9 +1717,9 @@ async def request_password_reset(body: PasswordResetRequestIn, request: Request)
         t = tpl.get("password_reset", DEFAULT_EMAILS["password_reset"])
         vars = {"name": user.get("display_name", ""), "reset_link": reset_link}
         await send_email(email, render_template(t["subject"], vars), render_template(t["body"], vars))
-        logger.info(f"[RESET LINK for {email}] {reset_link}")
-        # In dev (no SMTP), expose the link to ease testing
+        # Only log the raw reset link in dev (no SMTP); in production this would leak the token.
         if not os.environ.get("SMTP_HOST"):
+            logger.info(f"[RESET LINK for {email}] {reset_link}")
             return {"ok": True, "dev_reset_link": reset_link}
     return {"ok": True}
 

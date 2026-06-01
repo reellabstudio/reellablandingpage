@@ -18,6 +18,7 @@ const NAV = [
   { section: "Growth", items: [
     { key: "waitlist", icon: "📧", label: "Waitlist" },
     { key: "founders", icon: "✦", label: "Founder Circle" },
+    { key: "abtest", icon: "🅰", label: "Founder A/B" },
   ]},
   { section: "Content", items: [
     { key: "dummy", icon: "🧪", label: "Dummy Data" },
@@ -38,7 +39,7 @@ const TITLES = {
   projects: "All Projects", pricing: "Pricing & Plans", waitlist: "Waitlist",
   founders: "Founder Circle Applications", dummy: "Dummy Data Manager", faq: "FAQ Editor",
   emails: "Email Templates", affiliates: "Affiliates & Badges", moderation: "Content Moderation",
-  settings: "Platform Settings",
+  settings: "Platform Settings", abtest: "Founder Checkout · A/B Test",
 };
 
 export default function CEOBackOffice() {
@@ -116,6 +117,7 @@ export default function CEOBackOffice() {
           {section === "pricing" && <Pricing showToast={showToast} />}
           {section === "waitlist" && <Waitlist />}
           {section === "founders" && <Founders />}
+          {section === "abtest" && <ABTest />}
           {section === "dummy" && <DummyData showToast={showToast} />}
           {section === "faq" && <FAQEditor showToast={showToast} />}
           {section === "emails" && <EmailTemplates showToast={showToast} />}
@@ -589,6 +591,98 @@ function Settings({ showToast }) {
           <div className={`mini-toggle ${v ? "on" : ""}`} onClick={() => toggle(k)} data-testid={`toggle-${k}`} />
         </div>
       ))}
+    </div>
+  );
+}
+
+
+// ─── A/B Test (Founder Checkout) ───
+function ABTest() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    api.get("/ceo/ab-test/founder-checkout").then((r) => setData(r.data));
+  }, []);
+  if (!data) return <div className="spinner" />;
+  const [a, b] = data.variants;
+  const winner = a.conversion_rate === b.conversion_rate
+    ? "tie"
+    : (a.conversion_rate > b.conversion_rate ? "a" : "b");
+
+  const variantCopy = {
+    a: { line1: "One dollar.", line2: "Founder status.", line3: "First month free." },
+    b: { line1: "One dollar today.", line2: "Yours for life.", line3: "First month free." },
+  };
+
+  return (
+    <div data-testid="ceo-abtest-panel">
+      <div className="card" style={{ marginBottom: 16, padding: 18 }}>
+        <div style={{ fontSize: 13, color: "var(--text-sec)", lineHeight: 1.6 }}>
+          50/50 split on <code>/founder-checkout</code>. Each unique visit fires one impression; conversions are paid <code>founder_circle</code> transactions tagged with the same variant.
+          Total impressions: <strong>{data.total_impressions}</strong> · Tracked conversions: <strong>{data.total_conversions}</strong> · Untracked (legacy): <strong>{data.untracked_conversions}</strong>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {[a, b].map((row) => {
+          const isWinner = winner === row.variant && (row.impressions > 0 || row.conversions > 0);
+          const copy = variantCopy[row.variant];
+          return (
+            <div key={row.variant} className="card" style={{ padding: 22, border: isWinner ? "1.5px solid var(--teal)" : "1px solid var(--border)" }} data-testid={`abtest-variant-${row.variant}`}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-dim)" }}>Variant {row.variant.toUpperCase()}</div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 400, lineHeight: 1.2, marginTop: 6 }}>
+                    {copy.line1}<br /><em style={{ color: "var(--purple-light)" }}>{copy.line2}</em><br />{copy.line3}
+                  </div>
+                </div>
+                {isWinner && <span className="pill pill-teal" style={{ fontSize: 10 }}>LEADING</span>}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: ".1em" }}>Impressions</div>
+                  <div style={{ fontSize: 22, fontWeight: 500 }} data-testid={`abtest-${row.variant}-imps`}>{row.impressions}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: ".1em" }}>Conversions</div>
+                  <div style={{ fontSize: 22, fontWeight: 500 }} data-testid={`abtest-${row.variant}-conv`}>{row.conversions}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: ".1em" }}>Conversion rate</div>
+                  <div style={{ fontSize: 22, fontWeight: 500, color: isWinner ? "var(--teal)" : "var(--text)" }} data-testid={`abtest-${row.variant}-rate`}>{row.conversion_rate}%</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", textTransform: "uppercase", letterSpacing: ".1em" }}>Revenue</div>
+                  <div style={{ fontSize: 22, fontWeight: 500, color: "var(--teal)" }} data-testid={`abtest-${row.variant}-rev`}>${row.revenue.toFixed(2)}</div>
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-dim)", marginBottom: 8 }}>By referral code</div>
+                {Object.keys(row.by_referral_code).length === 0 ? (
+                  <div style={{ fontSize: 12, color: "var(--text-dim)", fontStyle: "italic" }}>No conversions yet.</div>
+                ) : (
+                  <table className="data-table" style={{ width: "100%" }}>
+                    <thead><tr><th style={{ paddingLeft: 0 }}>Code</th><th style={{ textAlign: "right" }}>Conv.</th><th style={{ textAlign: "right" }}>Revenue</th></tr></thead>
+                    <tbody>
+                      {Object.entries(row.by_referral_code).sort((x, y) => y[1].revenue - x[1].revenue).map(([code, agg]) => (
+                        <tr key={code} data-testid={`abtest-${row.variant}-ref-${code}`}>
+                          <td style={{ paddingLeft: 0, fontFamily: "'DM Mono', monospace", fontSize: 12 }}>{code}</td>
+                          <td style={{ textAlign: "right", fontFamily: "'DM Mono', monospace", fontSize: 12 }}>{agg.count}</td>
+                          <td style={{ textAlign: "right", fontFamily: "'DM Mono', monospace", fontSize: 12, color: "var(--teal)" }}>${agg.revenue.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card" style={{ marginTop: 16, padding: 14, fontSize: 12, color: "var(--text-sec)", lineHeight: 1.7 }}>
+        <strong style={{ color: "var(--text)" }}>How to QA a variant:</strong> append <code>?v=a</code> or <code>?v=b</code> to <code>/founder-checkout</code> to force-load that variant. Add <code>?ref=YOURCODE</code> to also attach a referrer.
+      </div>
     </div>
   );
 }

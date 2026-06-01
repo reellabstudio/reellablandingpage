@@ -431,6 +431,13 @@ class CheckoutInitIn(BaseModel):
     handle: Optional[str] = ""
     referral_code: Optional[str] = ""
     coupon_code: Optional[str] = ""
+    ab_variant: Optional[str] = ""
+
+
+class ABImpressionIn(BaseModel):
+    page: str
+    variant: str
+    referral_code: Optional[str] = ""
 
 
 class PasswordResetRequestIn(BaseModel):
@@ -1345,6 +1352,7 @@ async def create_checkout(body: CheckoutInitIn, request: Request):
         "handle": body.handle or "",
         "referral_code": body.referral_code or "",
         "coupon_code": coupon_applied or "",
+        "ab_variant": body.ab_variant or "",
     }
 
     tx_id = str(uuid.uuid4())
@@ -1747,6 +1755,66 @@ async def public_emails():
         "support": os.environ.get("SUPPORT_EMAIL", "support@reellabstudio.com"),
         "sales": os.environ.get("SALES_EMAIL", "sales@reellabstudio.com"),
         "ceo": os.environ.get("CEO_EMAIL", "ceo@reellabstudio.com"),
+    }
+
+
+# ─── Public: payment mode (frontend hides card form when Stripe is live) ───
+@api.get("/public/payment-mode")
+async def public_payment_mode():
+    return {"stripe_live": not stripe_mock_mode()}
+
+
+# ─── A/B test: record impression + CEO analytics ───
+@api.post("/public/ab/impression")
+async def ab_impression(body: ABImpressionIn):
+    if body.variant not in ("a", "b"):
+        raise HTTPException(status_code=400, detail="Invalid variant")
+    await db.ab_impressions.insert_one({
+        "id": str(uuid.uuid4()),
+        "page": body.page,
+        "variant": body.variant,
+        "referral_code": (body.referral_code or "").upper(),
+        "at": now_iso(),
+    })
+    return {"ok": True}
+
+
+@api.get("/ceo/ab-test/founder-checkout")
+async def ceo_ab_founder(user: dict = Depends(require_ceo)):
+    """A/B-test analytics: impressions vs. paid conversions for /founder-checkout."""
+    impressions = await db.ab_impressions.find({"page": "founder-checkout"}, {"_id": 0}).to_list(20000)
+    txs = await db.payment_transactions.find(
+        {"package_id": "founder_circle", "payment_status": "paid"}, {"_id": 0}
+    ).to_list(20000)
+
+    def agg(variant: str):
+        imps = [i for i in impressions if i["variant"] == variant]
+        conv = [t for t in txs if (t.get("metadata") or {}).get("ab_variant") == variant]
+        revenue = round(sum(float(t.get("amount") or 0) for t in conv), 2)
+        rate = round((len(conv) / len(imps) * 100), 2) if imps else 0.0
+        # by referral code
+        by_ref = {}
+        for c in conv:
+            ref = ((c.get("metadata") or {}).get("referral_code") or "DIRECT").upper() or "DIRECT"
+            by_ref.setdefault(ref, {"count": 0, "revenue": 0.0})
+            by_ref[ref]["count"] += 1
+            by_ref[ref]["revenue"] += float(c.get("amount") or 0)
+        for v in by_ref.values():
+            v["revenue"] = round(v["revenue"], 2)
+        return {
+            "variant": variant,
+            "impressions": len(imps),
+            "conversions": len(conv),
+            "conversion_rate": rate,
+            "revenue": revenue,
+            "by_referral_code": by_ref,
+        }
+
+    return {
+        "variants": [agg("a"), agg("b")],
+        "total_impressions": len(impressions),
+        "total_conversions": sum(1 for t in txs if (t.get("metadata") or {}).get("ab_variant") in ("a", "b")),
+        "untracked_conversions": sum(1 for t in txs if (t.get("metadata") or {}).get("ab_variant") not in ("a", "b")),
     }
 
 

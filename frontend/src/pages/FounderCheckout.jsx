@@ -2,11 +2,50 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import api, { formatErr } from "../lib/api";
 
+// ─── A/B test variants for the hero headline.
+// Edit copy here; the system handles assignment + tracking automatically.
+const AB_VARIANTS = {
+  a: {
+    label: "Variant A (control)",
+    line1: "One dollar.",
+    line2: "Founder status.",
+    line3: "First month free.",
+    sub: "This isn't a subscription trap. It's a handshake. Pay $1 to lock in your Founder membership and get your first full month of Creator — a $49 value — completely on us.",
+    cta: "🔒 Pay $1.00 · Claim Founder Status",
+  },
+  b: {
+    label: "Variant B",
+    line1: "One dollar today.",
+    line2: "Yours for life.",
+    line3: "First month free.",
+    sub: "Lock in Founder pricing forever for the price of a coffee. We mean it — $1 today, your first month of Creator is on us, and the rate you pay never moves.",
+    cta: "🔒 Claim Founder · $1 Today",
+  },
+};
+
+function pickVariant() {
+  try {
+    const raw = localStorage.getItem("rl_ab_founder");
+    if (raw) {
+      const v = JSON.parse(raw);
+      if (v && (v.variant === "a" || v.variant === "b")) return v.variant;
+    }
+  } catch { /* noop */ }
+  const v = Math.random() < 0.5 ? "a" : "b";
+  try {
+    localStorage.setItem("rl_ab_founder", JSON.stringify({ variant: v, ts: Date.now() }));
+  } catch { /* noop */ }
+  return v;
+}
+
 export default function FounderCheckout() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const refCode = params.get("ref") || "";
+  const forceVariant = params.get("v"); // CEO QA: ?v=a or ?v=b
+  const [variant, setVariant] = useState("a");
   const [referrer, setReferrer] = useState(null);
+  const [paymentLive, setPaymentLive] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", creator_type: "", handle: "" });
   const [card, setCard] = useState({ number: "", exp: "", cvc: "" });
   const [err, setErr] = useState("");
@@ -15,12 +54,27 @@ export default function FounderCheckout() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
+
+    // Variant assignment
+    const v = (forceVariant === "a" || forceVariant === "b") ? forceVariant : pickVariant();
+    setVariant(v);
+
+    // Record impression once per page load
+    api.post("/public/ab/impression", {
+      page: "founder-checkout",
+      variant: v,
+      referral_code: refCode,
+    }).catch(() => { /* non-blocking */ });
+
+    // Payment mode (live → hide card form, Stripe Checkout handles it)
+    api.get("/public/payment-mode").then((r) => setPaymentLive(!!r.data?.stripe_live)).catch(() => {});
+
     if (refCode) {
       api.get(`/affiliate/lookup/${refCode}`).then((r) => {
         if (r.data.valid) setReferrer(r.data.referrer_name);
       }).catch(() => {});
     }
-  }, [refCode]);
+  }, [refCode, forceVariant]);
 
   const fmtCard = (v) => v.replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 ").slice(0, 19);
   const fmtExp = (v) => { const x = v.replace(/\D/g, ""); return x.length >= 2 ? x.slice(0, 2) + " / " + x.slice(2, 4) : x; };
@@ -29,9 +83,12 @@ export default function FounderCheckout() {
     setErr("");
     if (!form.name.trim()) return setErr("Please enter your first name.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return setErr("Please enter a valid email address.");
-    if (card.number.replace(/\s/g, "").length < 15) return setErr("Please enter a valid card number.");
-    if (card.exp.replace(/\s/g, "").length < 3) return setErr("Please enter your card expiry.");
-    if (card.cvc.length < 3) return setErr("Please enter your CVC.");
+    // In mock mode we collect card client-side (decorative); in live mode Stripe collects it.
+    if (!paymentLive) {
+      if (card.number.replace(/\s/g, "").length < 15) return setErr("Please enter a valid card number.");
+      if (card.exp.replace(/\s/g, "").length < 3) return setErr("Please enter your card expiry.");
+      if (card.cvc.length < 3) return setErr("Please enter your CVC.");
+    }
 
     setBusy(true);
     try {
@@ -43,6 +100,7 @@ export default function FounderCheckout() {
         creator_type: form.creator_type,
         handle: form.handle,
         referral_code: refCode,
+        ab_variant: variant,
       });
       // Mocked path returns our /checkout/mock — simulate paid then show success
       if (data.mocked) {
@@ -89,15 +147,17 @@ export default function FounderCheckout() {
               ))}
             </div>
             <Link to="/login" className="btn-primary" style={{ display: "inline-block", padding: "12px 28px", marginRight: 8 }} data-testid="founder-success-login">Sign in to your studio</Link>
-            <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 18 }}>Check your inbox for a welcome email. Questions? <a href="mailto:hello@reellabstudio.com" style={{ color: "var(--purple-light)" }}>hello@reellabstudio.com</a></p>
+            <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 18 }}>Check your inbox for a welcome email. Questions? <a href="mailto:support@reellabstudio.com" style={{ color: "var(--purple-light)" }}>support@reellabstudio.com</a></p>
           </div>
         </div>
       </div>
     );
   }
 
+  const v = AB_VARIANTS[variant] || AB_VARIANTS.a;
+
   return (
-    <div className="landing-page" data-testid="founder-checkout-page">
+    <div className="landing-page" data-testid="founder-checkout-page" data-ab-variant={variant}>
       <nav className="landing-nav">
         <Link to="/" className="rl-logo"><div className="rl-logo-mark">✦</div><span className="rl-logo-text">Reel<span>Lab</span></span></Link>
         <Link to="/" style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace" }} data-testid="checkout-back">← Back to ReelLab</Link>
@@ -111,11 +171,13 @@ export default function FounderCheckout() {
           {/* LEFT: Offer */}
           <div className="fade-in">
             <div className="founder-badge"><div className="founder-badge-dot" />Founder Circle · Limited Spots</div>
-            <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(2rem, 4vw, 3rem)", fontWeight: 400, lineHeight: 1.15, letterSpacing: "-0.02em", marginBottom: 16 }}>
-              One dollar.<br /><em style={{ fontStyle: "italic", color: "var(--purple-light)" }}>Founder status.</em><br />First month free.
+            <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(2rem, 4vw, 3rem)", fontWeight: 400, lineHeight: 1.15, letterSpacing: "-0.02em", marginBottom: 16 }} data-testid="founder-headline">
+              <span data-testid="founder-headline-line1">{v.line1}</span><br />
+              <em style={{ fontStyle: "italic", color: "var(--purple-light)" }} data-testid="founder-headline-line2">{v.line2}</em><br />
+              <span data-testid="founder-headline-line3">{v.line3}</span>
             </h1>
-            <p style={{ fontSize: 15, color: "var(--text-sec)", fontWeight: 300, lineHeight: 1.75, marginBottom: 32, maxWidth: 420 }}>
-              This isn't a subscription trap. It's a handshake. Pay $1 to lock in your Founder membership and get your first full month of Creator — a $49 value — completely on us.
+            <p style={{ fontSize: 15, color: "var(--text-sec)", fontWeight: 300, lineHeight: 1.75, marginBottom: 32, maxWidth: 420 }} data-testid="founder-subhead">
+              {v.sub}
             </p>
 
             {referrer && (
@@ -180,28 +242,40 @@ export default function FounderCheckout() {
             </div>
             <div style={{ marginBottom: 16 }}><label className="label">@ Handle (optional)</label><input className="input" placeholder="@yourusername · used for your future affiliate link" value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value })} data-testid="checkout-handle" /></div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "20px 0" }}>
-              <div style={{ flex: 1, height: 1, background: "var(--border)" }} /><div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: "var(--text-dim)", letterSpacing: ".08em", textTransform: "uppercase" }}>Payment · Stripe encrypted</div><div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-            </div>
+            {!paymentLive && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "20px 0" }}>
+                  <div style={{ flex: 1, height: 1, background: "var(--border)" }} /><div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: "var(--text-dim)", letterSpacing: ".08em", textTransform: "uppercase" }}>Payment · Stripe encrypted</div><div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                </div>
+                <div style={{ marginBottom: 10 }}><label className="label">Card number</label><input className="input" placeholder="1234 1234 1234 1234" maxLength={19} value={card.number} onChange={(e) => setCard({ ...card, number: fmtCard(e.target.value) })} data-testid="checkout-card" autoComplete="cc-number" /></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                  <div><label className="label">Expiry</label><input className="input" placeholder="MM / YY" maxLength={7} value={card.exp} onChange={(e) => setCard({ ...card, exp: fmtExp(e.target.value) })} data-testid="checkout-exp" autoComplete="cc-exp" /></div>
+                  <div><label className="label">CVC</label><input className="input" type="password" placeholder="•••" maxLength={4} value={card.cvc} onChange={(e) => setCard({ ...card, cvc: e.target.value })} data-testid="checkout-cvc" autoComplete="cc-csc" /></div>
+                </div>
+              </>
+            )}
 
-            <div style={{ marginBottom: 10 }}><label className="label">Card number</label><input className="input" placeholder="1234 1234 1234 1234" maxLength={19} value={card.number} onChange={(e) => setCard({ ...card, number: fmtCard(e.target.value) })} data-testid="checkout-card" autoComplete="cc-number" /></div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-              <div><label className="label">Expiry</label><input className="input" placeholder="MM / YY" maxLength={7} value={card.exp} onChange={(e) => setCard({ ...card, exp: fmtExp(e.target.value) })} data-testid="checkout-exp" autoComplete="cc-exp" /></div>
-              <div><label className="label">CVC</label><input className="input" type="password" placeholder="•••" maxLength={4} value={card.cvc} onChange={(e) => setCard({ ...card, cvc: e.target.value })} data-testid="checkout-cvc" autoComplete="cc-csc" /></div>
-            </div>
+            {paymentLive && (
+              <div style={{ margin: "18px 0 18px", padding: 14, background: "var(--teal-light, rgba(15,155,122,.08))", border: "1px solid rgba(15,155,122,.3)", borderRadius: 10, fontSize: 12, color: "var(--text-sec)", lineHeight: 1.6 }} data-testid="checkout-stripe-redirect">
+                <strong style={{ color: "var(--teal)" }}>Continue on Stripe →</strong><br />
+                You'll be redirected to Stripe's secure checkout page to enter your card details. We never touch your card data directly.
+              </div>
+            )}
 
             {err && <p style={{ fontSize: 12, color: "#E07070", marginBottom: 12, textAlign: "center" }} data-testid="checkout-error">{err}</p>}
 
             <button className="btn-primary" style={{ width: "100%", padding: 14, fontSize: 14, marginBottom: 10 }} onClick={submit} disabled={busy} data-testid="checkout-pay">
-              {busy ? "Processing…" : "🔒 Pay $1.00 · Claim Founder Status"}
+              {busy ? "Processing…" : (paymentLive ? "🔒 Continue to Stripe · $1.00" : v.cta)}
             </button>
             <div style={{ fontSize: 10, color: "var(--text-dim)", textAlign: "center", fontFamily: "'DM Mono', monospace", letterSpacing: ".04em" }}>
               256-bit SSL encryption · Powered by Stripe
             </div>
 
-            <div style={{ marginTop: 16, padding: 12, background: "var(--amber-light)", border: "1px solid rgba(196,137,26,.3)", borderRadius: 8, fontSize: 11, color: "var(--amber)" }}>
-              ⓘ Stripe charges are <strong>MOCKED</strong> in this preview. No real money will move. At deployment we swap in your Stripe keys and live charges flow through with zero code changes.
-            </div>
+            {!paymentLive && (
+              <div style={{ marginTop: 16, padding: 12, background: "var(--amber-light)", border: "1px solid rgba(196,137,26,.3)", borderRadius: 8, fontSize: 11, color: "var(--amber)" }} data-testid="checkout-mocked-banner">
+                ⓘ Stripe charges are <strong>MOCKED</strong> in this preview. No real money will move.
+              </div>
+            )}
           </div>
 
         </div>

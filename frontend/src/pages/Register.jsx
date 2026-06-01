@@ -7,7 +7,7 @@ import { LOGO_WORDMARK_WHITE, formatErr } from "../lib/api";
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ display_name: "", username: "", email: "", password: "" });
+  const [form, setForm] = useState({ first_name: "", last_name: "", username: "", email: "", password: "" });
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -16,6 +16,8 @@ export default function Register() {
   const onSubmit = async (e) => {
     e.preventDefault();
     setErr("");
+    if (!form.first_name.trim()) return setErr("First name is required.");
+    if (!form.last_name.trim()) return setErr("Last name is required.");
     setLoading(true);
     try {
       await register(form);
@@ -47,9 +49,15 @@ export default function Register() {
           <p style={{ color: "var(--text-sec)", fontSize: 14, marginBottom: 28 }}>Welcome to ReelLab Studio.</p>
 
           <form onSubmit={onSubmit}>
-            <div style={{ marginBottom: 14 }}>
-              <label className="label">Display name</label>
-              <input className="input" value={form.display_name} onChange={(e) => set("display_name", e.target.value)} required data-testid="register-display-name" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+              <div>
+                <label className="label">First name<span style={{ color: "var(--coral)" }}> *</span></label>
+                <input className="input" value={form.first_name} onChange={(e) => set("first_name", e.target.value)} required data-testid="register-first-name" />
+              </div>
+              <div>
+                <label className="label">Last name<span style={{ color: "var(--coral)" }}> *</span></label>
+                <input className="input" value={form.last_name} onChange={(e) => set("last_name", e.target.value)} required data-testid="register-last-name" />
+              </div>
             </div>
             <div style={{ marginBottom: 14 }}>
               <label className="label">Username</label>

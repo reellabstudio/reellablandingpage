@@ -25,6 +25,8 @@ const emptyForm = () => ({
   end_date: "",
   usage_limit_type: "single",
   usage_limit: 1,
+  promotional: false,
+  group_tag: "",
   active: true,
 });
 
@@ -228,6 +230,19 @@ export default function AccessControl({ showToast }) {
                 </>
               )}
             </div>
+          </div>
+
+          <div style={{ padding: "12px 14px", background: "var(--surface2)", borderRadius: 10, marginBottom: 14, border: "0.5px solid var(--border)" }}>
+            <label style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, cursor: "pointer", marginBottom: form.promotional ? 10 : 0 }}>
+              <div className={`mini-toggle ${form.promotional ? "on" : ""}`} onClick={() => set("promotional", !form.promotional)} data-testid="ac-promotional" />
+              <span style={{ color: "var(--text)" }}>Promotional pricing — flag this as a campaign coupon</span>
+            </label>
+            {form.promotional && (
+              <div>
+                <label className="label" style={{ marginTop: 6 }}>Group / Tag</label>
+                <input className="input" value={form.group_tag} onChange={(e) => set("group_tag", e.target.value)} placeholder='e.g. "Founders", "VIP", "Holiday Sale"' data-testid="ac-group-tag" />
+              </div>
+            )}
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: ".5px solid var(--border)" }}>

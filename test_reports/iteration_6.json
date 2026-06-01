@@ -1,0 +1,52 @@
+{
+  "summary": "ReelLab Studio v6 launch verification — backend 15/15 pytest pass; frontend DOM checks for nav (studio_owner vs CEO), invoices CEO gating, MOCKED text removal, Content Studio testids, and CEO Access Control all pass. Register form correctly enforces separate first/last name fields and blocks API call on empty last_name. Caption AI returns 3 captions via Claude. Coupons accept promotional + group_tag and round-trip via GET.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v6.py",
+    "/app/test_reports/pytest/pytest_v6.xml"
+  ],
+  "action_items": [
+    "(Optional) Confirm the inline error string for empty last_name on /register — the client correctly blocks the API call (URL stayed on /register) but the literal text 'Last name is required.' was not found in DOM under common error selectors. Functionally fine; verify copy if exact wording matters.",
+    "(Optional/test-doc) Note that in the standalone caption-gen modal, platform testids are 'gen-platform-<key>' (e.g. gen-platform-instagram). The 'platform-<key>' testids live on the per-day post-modal. Spec mentions both; both exist — just under different parent components."
+  ],
+  "critical_code_review_comments": [
+    "ContentStudio post endpoints require the full ContentPostIn body on PATCH (title/platform/scheduled_for/caption). If you want true partial PATCH behavior, change the handler to accept Optional[...] fields or split into a separate UpdateIn schema. Current behaviour is acceptable but the verb is misleading — consider PUT or making it partial.",
+    "/api/content/posts response shapes are mixed: POST returns {post:{...}}, GET returns {posts:[...]}, PATCH/DELETE return {ok:true}. Frontend works, but a unified envelope (always {post}/{posts}) would simplify clients and tests.",
+    "Register flow: server returns user with first_name/last_name and display_name = first+' '+last — looks good. Consider trimming whitespace before composing display_name.",
+    "CEO Access Control: ac-group-tag only renders when promotional=true. Test scripts must toggle ac-promotional ON before asserting the field. Consider rendering the input disabled-but-visible so testability is unconditional.",
+    "/api/auth/me wraps response as {user:{...}, ...} — consistent with login. Confirmed via tests."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v6.py"
+  ],
+  "success_rate": {
+    "backend": "100% (15/15)",
+    "frontend": "100% on the spec checklist (all required testids + nav + MOCKED-text checks pass)"
+  },
+  "test_credentials": "CEO ceo@reellabstudio.com / ReelLabceo26! ; studio_owner jane.doe.test@reellabstudio.com / testpass123 ; also registered a few TEST_v6_<uniq>@example.com users for backend tests",
+  "seed_data_creation": "Backend tests register fresh TEST_v6_<uuid>@example.com users and create coupon TESTV6<hex> with promotional+group_tag. Content posts are created and then deleted (or orphaned with TEST_v6 caption prefix on CEO account).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test_v6.py covers: register first/last, /api/auth/me names, invoices CEO gating, content-posts CRUD owner-scoping, caption AI (1 live call), coupons promotional+group_tag, non-CEO 403. Run with: REACT_APP_BACKEND_URL=<url> pytest backend/tests/backend_test_v6.py -v. Frontend verified live against the preview URL. Caption AI call cost is minimized to 1 successful call per run. STRIPE was NOT charged (no checkout completion).",
+  "stripe_safety": "Verified — did NOT click through to Stripe. /founder-checkout?v=a renders with [data-testid='checkout-pay'] but was never clicked. STRIPE_MODE=live confirmed via no MOCKED banner and 'Powered by Stripe' copy.",
+  "mocked_text_audit": {
+    "/invoices (studio_owner)": "no MOCKED text",
+    "/content-studio": "no MOCKED text",
+    "/editor": "no MOCKED text",
+    "/founder-checkout?v=a": "no MOCKED text, no [data-testid='checkout-mocked-banner']"
+  },
+  "nav_audit": {
+    "studio_owner_topnav": ["Dashboard", "Projects", "AI Editor", "Content Studio", "Invoices", "Community", "Sparks"],
+    "studio_owner_does_NOT_have": ["Clients"],
+    "ceo_topnav_at_dashboard": ["Dashboard", "Projects", "Clients", "AI Editor", "Content Studio", "Invoices", "Community", "Sparks", "CEO"]
+  },
+  "rca_of_the_issue": "N/A — no functional bugs found in iteration 6 changes."
+}

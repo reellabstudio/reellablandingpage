@@ -25,6 +25,7 @@ import AffiliateHub from "./pages/AffiliateHub";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
+import ContentStudio from "./pages/ContentStudio";
 
 function Protected({ children, requireLegal = true }) {
   const { user } = useAuth();
@@ -97,6 +98,7 @@ function App() {
           <Route path="/community" element={<Protected><AppShell><Community /></AppShell></Protected>} />
           <Route path="/profile" element={<Protected><AppShell><Profile /></AppShell></Protected>} />
           <Route path="/sparks" element={<Protected><AppShell><AffiliateHub /></AppShell></Protected>} />
+          <Route path="/content-studio" element={<Protected><AppShell><ContentStudio /></AppShell></Protected>} />
           <Route path="/ceo" element={<Protected requireLegal={false}><HelpBotWrapper><CEOBackOffice /></HelpBotWrapper></Protected>} />
 
           <Route path="*" element={<NotFound />} />

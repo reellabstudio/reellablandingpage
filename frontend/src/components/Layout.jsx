@@ -4,11 +4,21 @@ import { Logo, Badge, Avatar } from "./Logo";
 import { Sun, Moon, Bell, LogOut, Settings, Shield } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
-const TABS = [
+const TABS_USER = [
+  { to: "/dashboard", label: "Dashboard" },
+  { to: "/projects", label: "Projects" },
+  { to: "/editor", label: "AI Editor" },
+  { to: "/content-studio", label: "Content Studio" },
+  { to: "/invoices", label: "Invoices" },
+  { to: "/community", label: "Community" },
+  { to: "/sparks", label: "Sparks" },
+];
+const TABS_CEO = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
   { to: "/clients", label: "Clients" },
   { to: "/editor", label: "AI Editor" },
+  { to: "/content-studio", label: "Content Studio" },
   { to: "/invoices", label: "Invoices" },
   { to: "/community", label: "Community" },
   { to: "/sparks", label: "Sparks" },
@@ -20,6 +30,7 @@ export default function Layout({ children }) {
   const loc = useLocation();
   const [menu, setMenu] = useState(false);
   const ref = useRef(null);
+  const TABS = user?.role === "ceo" ? TABS_CEO : TABS_USER;
 
   useEffect(() => {
     const fn = (e) => { if (ref.current && !ref.current.contains(e.target)) setMenu(false); };

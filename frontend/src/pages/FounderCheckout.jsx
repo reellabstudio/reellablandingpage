@@ -274,12 +274,6 @@ export default function FounderCheckout() {
             <div style={{ fontSize: 10, color: "var(--text-dim)", textAlign: "center", fontFamily: "'DM Mono', monospace", letterSpacing: ".04em" }}>
               256-bit SSL encryption · Powered by Stripe
             </div>
-
-            {!paymentLive && (
-              <div style={{ marginTop: 16, padding: 12, background: "var(--amber-light)", border: "1px solid rgba(196,137,26,.3)", borderRadius: 8, fontSize: 11, color: "var(--amber)" }} data-testid="checkout-mocked-banner">
-                ⓘ Stripe charges are <strong>MOCKED</strong> in this preview. No real money will move.
-              </div>
-            )}
           </div>
 
         </div>

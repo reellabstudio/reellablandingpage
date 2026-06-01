@@ -104,10 +104,15 @@ async def require_ceo(user: dict = Depends(get_current_user)) -> dict:
 
 
 def public_user(u: dict) -> dict:
+    first = (u.get("first_name") or "").strip()
+    last = (u.get("last_name") or "").strip()
+    derived_display = (first + " " + last).strip() or u.get("display_name", "")
     return {
         "id": u["id"],
         "email": u["email"],
-        "display_name": u.get("display_name", ""),
+        "first_name": first,
+        "last_name": last,
+        "display_name": derived_display or u.get("display_name", ""),
         "username": u.get("username", ""),
         "role": u.get("role", "studio_owner"),
         "badge": u.get("badge", "none"),
@@ -132,7 +137,8 @@ def public_user(u: dict) -> dict:
 class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
-    display_name: str
+    first_name: str = Field(min_length=1, max_length=60)
+    last_name: str = Field(min_length=1, max_length=60)
     username: str
 
 
@@ -194,6 +200,7 @@ class InvoiceIn(BaseModel):
     project_id: Optional[str] = None
     client_id: Optional[str] = None
     client_name: str
+    client_email: Optional[str] = ""
     items: List[InvoiceItem]
     due_date: Optional[str] = None
     notes: str = ""
@@ -303,7 +310,25 @@ class CouponIn(BaseModel):
     end_date: Optional[str] = ""
     usage_limit_type: Literal["single", "limited", "unlimited"]
     usage_limit: Optional[int] = 1
+    promotional: bool = False
+    group_tag: Optional[str] = ""
     active: bool = True
+
+
+class ContentPostIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    caption: str = ""
+    platform: Literal["instagram", "tiktok", "youtube", "x", "facebook"]
+    scheduled_for: str  # ISO datetime
+    media_url: Optional[str] = ""
+    status: Literal["draft", "scheduled", "published"] = "scheduled"
+    notes: Optional[str] = ""
+
+
+class CaptionGenIn(BaseModel):
+    platform: Literal["instagram", "tiktok", "youtube", "x", "facebook"]
+    topic: str = Field(min_length=2, max_length=600)
+    tone: Optional[str] = "engaging"
 
 
 class CouponValidateIn(BaseModel):
@@ -462,7 +487,9 @@ async def register(body: RegisterIn):
         "id": str(uuid.uuid4()),
         "email": email,
         "password_hash": hash_password(body.password),
-        "display_name": body.display_name,
+        "first_name": body.first_name.strip(),
+        "last_name": body.last_name.strip(),
+        "display_name": (body.first_name.strip() + " " + body.last_name.strip()).strip(),
         "username": body.username.lower().strip(),
         "role": "studio_owner",
         "badge": "none",
@@ -767,12 +794,41 @@ async def auto_edit(vpid: str, payload: dict, user: dict = Depends(get_current_u
 # ---------- Invoices ----------
 @api.get("/invoices")
 async def list_invoices(user: dict = Depends(get_current_user)):
-    items = await db.invoices.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return {"invoices": items}
+    if user.get("role") == "ceo":
+        items = await db.invoices.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+        return {"invoices": items, "can_create": True}
+    # Clients: read-only view of their paid payment history (subscriptions + Founder Circle + AI credits)
+    own_email = (user.get("email") or "").lower()
+    txs = await db.payment_transactions.find(
+        {"$and": [
+            {"payment_status": "paid"},
+            {"$or": [{"user_email": own_email}, {"metadata.email": own_email}]},
+        ]},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(500)
+    synthesized = []
+    for t in txs:
+        pkg = (t.get("package_id") or "").replace("_", " ").title()
+        synthesized.append({
+            "id": t.get("id") or t.get("session_id"),
+            "number": (t.get("session_id") or "")[-8:].upper() or "—",
+            "client_name": user.get("first_name", "") + " " + user.get("last_name", "") or user.get("display_name", ""),
+            "client_email": own_email,
+            "total": round(float(t.get("amount") or 0.0), 2),
+            "items": [{"label": pkg or "Subscription", "amount": float(t.get("amount") or 0.0)}],
+            "status": "paid",
+            "package_id": t.get("package_id"),
+            "created_at": t.get("created_at") or t.get("paid_at"),
+            "paid_at": t.get("paid_at") or t.get("created_at"),
+            "read_only": True,
+        })
+    # Optionally also surface manually-created invoices by CEO addressed to this user
+    addressed = await db.invoices.find({"client_email": own_email}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"invoices": synthesized + addressed, "can_create": False}
 
 
 @api.post("/invoices")
-async def create_invoice(body: InvoiceIn, user: dict = Depends(get_current_user)):
+async def create_invoice(body: InvoiceIn, user: dict = Depends(require_ceo)):
     total = sum(i.amount for i in body.items)
     inv = {
         "id": str(uuid.uuid4()),
@@ -789,17 +845,16 @@ async def create_invoice(body: InvoiceIn, user: dict = Depends(get_current_user)
 
 
 @api.patch("/invoices/{iid}/status")
-async def update_invoice_status(iid: str, payload: dict, user: dict = Depends(get_current_user)):
+async def update_invoice_status(iid: str, payload: dict, user: dict = Depends(require_ceo)):
     new_status = payload.get("status", "sent")
-    await db.invoices.update_one({"id": iid, "owner_id": user["id"]}, {"$set": {"status": new_status}})
+    await db.invoices.update_one({"id": iid}, {"$set": {"status": new_status}})
     return {"ok": True}
 
 
 @api.post("/invoices/{iid}/pay")
-async def mock_pay_invoice(iid: str, user: dict = Depends(get_current_user)):
-    """Mocked Stripe payment — instantly marks invoice as paid."""
+async def pay_invoice(iid: str, user: dict = Depends(require_ceo)):
     await db.invoices.update_one({"id": iid}, {"$set": {"status": "paid", "paid_at": now_iso()}})
-    return {"ok": True, "mocked": True}
+    return {"ok": True}
 
 
 # ---------- Community ----------
@@ -1984,6 +2039,102 @@ async def ceo_coupon_redemptions(user: dict = Depends(require_ceo)):
     return {"redemptions": rows}
 
 
+# ─── Content Studio: scheduled posts + AI caption generator ───
+@api.get("/content/posts")
+async def list_content_posts(user: dict = Depends(get_current_user)):
+    posts = await db.content_posts.find({"owner_id": user["id"]}, {"_id": 0}).sort("scheduled_for", 1).to_list(2000)
+    return {"posts": posts}
+
+
+@api.post("/content/posts")
+async def create_content_post(body: ContentPostIn, user: dict = Depends(get_current_user)):
+    post = {
+        "id": str(uuid.uuid4()),
+        "owner_id": user["id"],
+        **body.model_dump(),
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+    }
+    await db.content_posts.insert_one(post)
+    post.pop("_id", None)
+    return {"post": post}
+
+
+@api.patch("/content/posts/{pid}")
+async def update_content_post(pid: str, body: ContentPostIn, user: dict = Depends(get_current_user)):
+    existing = await db.content_posts.find_one({"id": pid, "owner_id": user["id"]})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Post not found")
+    upd = body.model_dump()
+    upd["updated_at"] = now_iso()
+    await db.content_posts.update_one({"id": pid, "owner_id": user["id"]}, {"$set": upd})
+    return {"ok": True}
+
+
+@api.delete("/content/posts/{pid}")
+async def delete_content_post(pid: str, user: dict = Depends(get_current_user)):
+    res = await db.content_posts.delete_one({"id": pid, "owner_id": user["id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return {"ok": True}
+
+
+_PLATFORM_RULES = {
+    "instagram": "Optimised for Instagram: a strong hook line, 2–4 short lines, an emoji or two, 4–8 relevant hashtags at the end. Max 220 chars total.",
+    "tiktok": "Optimised for TikTok: a hook in the first 6 words, a tiny callout to the trend/sound, a casual tone, 2–4 hashtags. Max 140 chars.",
+    "youtube": "Optimised for a YouTube Shorts / video description: 1-line hook, then 1 line of context, then a clear CTA (subscribe / comment / link). No hashtags inline (put 3 at the end). Max 280 chars.",
+    "x": "Optimised for X (Twitter): one punchy line, ≤ 240 chars, max 1 hashtag, no emoji storms. Punch over polish.",
+    "facebook": "Optimised for Facebook: conversational tone, 2–3 lines, ask a question, 1–2 hashtags. Max 250 chars.",
+}
+
+
+@api.post("/content/caption/generate")
+async def generate_caption(body: CaptionGenIn, user: dict = Depends(get_current_user)):
+    """AI-powered: returns 3 distinct caption options optimised for the chosen platform."""
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+    except Exception:
+        raise HTTPException(status_code=503, detail="AI integration unavailable")
+
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="LLM key not configured")
+
+    rules = _PLATFORM_RULES[body.platform]
+    sys_msg = (
+        "You write scroll-stopping social media captions for creators. "
+        f"Platform rules: {rules} "
+        f"Tone: {body.tone or 'engaging'}. "
+        "Return EXACTLY 3 caption options, separated by the literal token <<NEXT>> (no numbering, no labels, no quotes, no preamble). "
+        "Never include the word 'Option' or numbered lists in your reply."
+    )
+
+    chat = LlmChat(
+        api_key=api_key,
+        session_id=f"cap-{user['id']}-{uuid.uuid4().hex[:8]}",
+        system_message=sys_msg,
+    ).with_model("anthropic", "claude-sonnet-4-6")
+
+    msg = UserMessage(text=f"Topic / content brief:\n{body.topic.strip()}\n\nWrite 3 distinct captions now.")
+
+    try:
+        raw = await chat.send_message(msg)
+    except Exception as e:
+        logger.error(f"caption generation failed: {e}")
+        raise HTTPException(status_code=502, detail="Caption generation failed — please retry.")
+
+    text = (raw or "").strip()
+    # Try the marker first, then fall back to numbered/blank-line parsing
+    parts = [p.strip() for p in text.split("<<NEXT>>") if p.strip()]
+    if len(parts) < 3:
+        import re
+        parts = [p.strip(" \"'•-") for p in re.split(r"\n\s*\n+|\n(?=\d\.|\d\))", text) if p.strip()]
+    captions = [p for p in parts if p][:3]
+    while len(captions) < 3:
+        captions.append(text.strip() or "Couldn't generate — please retry.")
+    return {"captions": captions, "platform": body.platform}
+
+
 @app.on_event("startup")
 async def on_startup():
     # Indexes
@@ -1994,6 +2145,9 @@ async def on_startup():
         await db.clients.create_index("owner_id")
         await db.invoices.create_index("owner_id")
         await db.posts.create_index("created_at")
+        await db.content_posts.create_index([("owner_id", 1), ("scheduled_for", 1)])
+        await db.coupons.create_index("code", unique=True)
+        await db.coupon_redemptions.create_index("redeemed_at")
         await db.star_transactions.create_index([("sender_id", 1), ("recipient_id", 1), ("date", 1)], unique=True)
     except Exception as e:
         logger.warning(f"index setup: {e}")
@@ -2007,6 +2161,8 @@ async def on_startup():
             "id": str(uuid.uuid4()),
             "email": ceo_email,
             "password_hash": hash_password(ceo_password),
+            "first_name": "ReelLab",
+            "last_name": "CEO",
             "display_name": "ReelLab CEO",
             "username": "ceo",
             "role": "ceo",

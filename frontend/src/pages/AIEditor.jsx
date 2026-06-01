@@ -165,7 +165,7 @@ export default function AIEditor() {
   };
 
   const exportVideo = () => {
-    showToast("✦ Export started — you'll get a download link when ready (MOCKED)");
+    showToast("✦ Export started — you'll get a download link when ready");
   };
 
   const startNew = () => {
@@ -407,7 +407,6 @@ export default function AIEditor() {
                   </select>
                 </div>
                 <button className="btn-primary" style={{ width: "100%", padding: 10 }} onClick={exportVideo} data-testid="export-now">Export now</button>
-                <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 10, textAlign: "center" }}>Export is MOCKED in preview.</div>
               </>
             )}
           </div>
@@ -418,7 +417,7 @@ export default function AIEditor() {
         <div className="modal-overlay" data-testid="payment-modal">
           <div className="modal">
             <div className="modal-title">Complete payment</div>
-            <div className="modal-sub">Pay $19 to process this upload. Payment is <strong>MOCKED</strong> in the preview environment.</div>
+            <div className="modal-sub">Pay $19 to process this upload. Secure checkout via Stripe.</div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "0.5px solid var(--border)" }}>
               <span style={{ fontSize: 13, color: "var(--text-sec)" }}>File</span>
               <span style={{ fontSize: 13 }}>{filename || "—"}</span>

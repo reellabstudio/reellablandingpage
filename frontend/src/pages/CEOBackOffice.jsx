@@ -4,6 +4,7 @@ import api from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Badge, Avatar } from "../components/Logo";
 import { Shield, LogOut, RefreshCw, Plus, Trash2, Save, Edit3, AlertTriangle, Check, X } from "lucide-react";
+import AccessControl from "./CEOAccessControl";
 
 const NAV = [
   { section: "Overview", items: [
@@ -30,6 +31,7 @@ const NAV = [
     { key: "moderation", icon: "🛡️", label: "Moderation" },
   ]},
   { section: "Platform", items: [
+    { key: "access", icon: "🔐", label: "Access Control" },
     { key: "settings", icon: "⚙️", label: "Platform Settings" },
   ]},
 ];
@@ -40,6 +42,7 @@ const TITLES = {
   founders: "Founder Circle Applications", dummy: "Dummy Data Manager", faq: "FAQ Editor",
   emails: "Email Templates", affiliates: "Affiliates & Badges", moderation: "Content Moderation",
   settings: "Platform Settings", abtest: "Founder Checkout · A/B Test",
+  access: "Access Control · Coupons & Overrides",
 };
 
 export default function CEOBackOffice() {
@@ -118,6 +121,7 @@ export default function CEOBackOffice() {
           {section === "waitlist" && <Waitlist />}
           {section === "founders" && <Founders />}
           {section === "abtest" && <ABTest />}
+          {section === "access" && <AccessControl showToast={showToast} />}
           {section === "dummy" && <DummyData showToast={showToast} />}
           {section === "faq" && <FAQEditor showToast={showToast} />}
           {section === "emails" && <EmailTemplates showToast={showToast} />}
@@ -315,7 +319,7 @@ function Pricing({ showToast }) {
     await api.put("/ceo/pricing", { plan, monthly: pricing[plan].monthly, yearly: pricing[plan].yearly });
     showToast(`${plan} pricing saved`);
   };
-  const syncStripe = async () => { await api.post("/ceo/pricing/sync-stripe"); showToast("Stripe sync simulated (mocked)"); };
+  const syncStripe = async () => { await api.post("/ceo/pricing/sync-stripe"); showToast("Stripe pricing synced"); };
   return (
     <div data-testid="ceo-pricing-panel">
       <div className="grid-3" style={{ marginBottom: 20 }}>

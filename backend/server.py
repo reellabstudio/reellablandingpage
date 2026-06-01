@@ -288,6 +288,30 @@ class ModerationResolveIn(BaseModel):
     note: str = ""
 
 
+# ─── Coupons / Access Control ───
+class CouponIn(BaseModel):
+    code: str
+    label: str = ""
+    discount_type: Literal["percent", "free"]
+    discount_value: int = 0  # 1..99 when percent, 100 when free
+    plan: Literal["solo", "creator", "studio"]
+    assignment_type: Literal["email", "shareable"]
+    assigned_email: Optional[str] = ""
+    duration_type: Literal["fixed", "end_date", "unlimited"]
+    duration_amount: Optional[int] = 0
+    duration_unit: Optional[Literal["days", "months"]] = "days"
+    end_date: Optional[str] = ""
+    usage_limit_type: Literal["single", "limited", "unlimited"]
+    usage_limit: Optional[int] = 1
+    active: bool = True
+
+
+class CouponValidateIn(BaseModel):
+    code: str
+    plan: Literal["solo", "creator", "studio"]
+    email: Optional[EmailStr] = None
+
+
 DEFAULT_PRICING = {
     "solo": {"monthly": 19.0, "yearly": 180.0},
     "creator": {"monthly": 49.0, "yearly": 468.0},
@@ -315,11 +339,20 @@ DEFAULT_EMAILS = {
 # Stripe pricing (server-defined — never trust client)
 STRIPE_PACKAGES = {
     "founder_circle": {"amount": 1.00, "label": "Founder Circle Membership", "description": "Lifetime status · first month of Creator free"},
+    "solo_monthly": {"amount": 19.00, "label": "Solo Plan · Monthly"},
+    "solo_yearly": {"amount": 180.00, "label": "Solo Plan · Yearly"},
     "creator_monthly": {"amount": 49.00, "label": "Creator Plan · Monthly"},
     "creator_yearly": {"amount": 468.00, "label": "Creator Plan · Yearly"},
     "studio_monthly": {"amount": 199.00, "label": "Studio Plan · Monthly"},
     "studio_yearly": {"amount": 1908.00, "label": "Studio Plan · Yearly"},
     "ai_processing": {"amount": 19.00, "label": "AI Video Processing"},
+}
+
+# Map package_id → plan key
+PACKAGE_TO_PLAN = {
+    "solo_monthly": "solo", "solo_yearly": "solo",
+    "creator_monthly": "creator", "creator_yearly": "creator",
+    "studio_monthly": "studio", "studio_yearly": "studio",
 }
 
 # Affiliate commission rates
@@ -390,13 +423,14 @@ def make_referral_code(user_id: str) -> str:
 
 # ─── Additional Models ───
 class CheckoutInitIn(BaseModel):
-    package_id: Literal["founder_circle", "creator_monthly", "creator_yearly", "studio_monthly", "studio_yearly", "ai_processing"]
+    package_id: Literal["founder_circle", "creator_monthly", "creator_yearly", "studio_monthly", "studio_yearly", "ai_processing", "solo_monthly", "solo_yearly"]
     origin_url: str
     name: Optional[str] = ""
     email: Optional[EmailStr] = None
     creator_type: Optional[str] = ""
     handle: Optional[str] = ""
     referral_code: Optional[str] = ""
+    coupon_code: Optional[str] = ""
 
 
 class PasswordResetRequestIn(BaseModel):
@@ -1282,6 +1316,22 @@ async def create_checkout(body: CheckoutInitIn, request: Request):
     pkg = STRIPE_PACKAGES[body.package_id]
     amount = float(pkg["amount"])
 
+    # Coupon validation + discount application (server-side only — never trust client)
+    coupon_applied = None
+    free_via_coupon = False
+    if body.coupon_code and body.package_id in PACKAGE_TO_PLAN:
+        plan_key = PACKAGE_TO_PLAN[body.package_id]
+        v = await _validate_coupon(body.coupon_code, plan_key, body.email)
+        if not v["valid"]:
+            raise HTTPException(status_code=400, detail=f"Coupon error: {v['reason']}")
+        c = v["coupon"]
+        if c["discount_type"] == "free":
+            amount = 0.0
+            free_via_coupon = True
+        else:
+            amount = round(amount * (1 - int(c["discount_value"]) / 100.0), 2)
+        coupon_applied = c["code"]
+
     # Build URLs from frontend's origin (never hardcode)
     origin = body.origin_url.rstrip("/")
     success_url = f"{origin}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}&pkg={body.package_id}"
@@ -1294,12 +1344,31 @@ async def create_checkout(body: CheckoutInitIn, request: Request):
         "creator_type": body.creator_type or "",
         "handle": body.handle or "",
         "referral_code": body.referral_code or "",
+        "coupon_code": coupon_applied or "",
     }
 
     tx_id = str(uuid.uuid4())
 
+    # 100%-free path — bypass Stripe entirely, mark paid immediately
+    if free_via_coupon:
+        fake_session = f"cs_free_{tx_id[:12]}"
+        await db.payment_transactions.insert_one({
+            "id": tx_id,
+            "session_id": fake_session,
+            "package_id": body.package_id,
+            "amount": 0.0,
+            "currency": "usd",
+            "payment_status": "paid",
+            "metadata": metadata,
+            "mocked": True,
+            "free_via_coupon": True,
+            "created_at": now_iso(),
+            "completed_at": now_iso(),
+        })
+        await _log_coupon_redemption(coupon_applied, body.email, body.package_id, 100.0, free=True)
+        return {"url": f"{origin}/checkout/success?session_id={fake_session}&pkg={body.package_id}", "session_id": fake_session, "free": True, "mocked": True}
+
     if stripe_mock_mode():
-        # Mocked: skip Stripe entirely, mark as 'pending' with a fake session id
         fake_session = f"cs_mock_{tx_id[:12]}"
         await db.payment_transactions.insert_one({
             "id": tx_id,
@@ -1312,7 +1381,6 @@ async def create_checkout(body: CheckoutInitIn, request: Request):
             "mocked": True,
             "created_at": now_iso(),
         })
-        # Return a synthetic checkout page on our own site
         return {"url": f"{origin}/checkout/mock?session_id={fake_session}&pkg={body.package_id}", "session_id": fake_session, "mocked": True}
 
     # Live Stripe path
@@ -1336,6 +1404,32 @@ async def create_checkout(body: CheckoutInitIn, request: Request):
         "created_at": now_iso(),
     })
     return {"url": session.url, "session_id": session.session_id, "mocked": False}
+
+
+async def _log_coupon_redemption(code: str, email: str, package_id: str, discount_pct: float, free: bool = False):
+    """Record a coupon usage + increment counter."""
+    coupon = await db.coupons.find_one({"code": code})
+    if not coupon:
+        return
+    plan_key = PACKAGE_TO_PLAN.get(package_id, "")
+    expires = _coupon_expires_at(coupon)
+    await db.coupon_redemptions.insert_one({
+        "id": str(uuid.uuid4()),
+        "coupon_code": code,
+        "user_email": (email or "").lower(),
+        "plan": plan_key,
+        "package_id": package_id,
+        "discount_applied": f"{int(discount_pct)}%" if not free else "FREE",
+        "redeemed_at": now_iso(),
+        "access_expires_at": expires,
+    })
+    await db.coupons.update_one({"code": code}, {"$inc": {"usage_count": 1}})
+    await db.activity_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": "teal",
+        "text": f"<strong>{email}</strong> redeemed coupon <code>{code}</code> on {plan_key}",
+        "at": now_iso(),
+    })
 
 
 @api.get("/payments/status/{session_id}")
@@ -1390,6 +1484,14 @@ async def _finalize_payment(tx: dict, new_status: str):
     meta = tx.get("metadata", {})
     pkg_id = tx["package_id"]
     email = (meta.get("email") or "").lower().strip()
+
+    # If a coupon was applied (paid path, not free) — log redemption now that payment succeeded
+    coupon_code = meta.get("coupon_code", "")
+    if coupon_code and not tx.get("free_via_coupon"):
+        coupon = await db.coupons.find_one({"code": coupon_code})
+        if coupon:
+            discount_pct = int(coupon.get("discount_value", 0)) if coupon.get("discount_type") == "percent" else 100
+            await _log_coupon_redemption(coupon_code, email, pkg_id, discount_pct, free=False)
 
     # Founder Circle: create founder record + first-month-free flag
     if pkg_id == "founder_circle":
@@ -1678,6 +1780,140 @@ async def ceo_affiliates_overview(user: dict = Depends(require_ceo)):
             "active_sparks": sum(1 for r in referrals if r["referral_code"] == code and r.get("status") == "active"),
         })
     return {"affiliates": rows, "total_paid": round(sum(c["amount"] for c in commissions), 2)}
+
+
+# ─── Coupons / Access Control (CEO) ───
+def _coupon_expires_at(coupon: dict, from_iso: str = None) -> Optional[str]:
+    base = datetime.fromisoformat((from_iso or now_iso()).replace("Z", "+00:00"))
+    if coupon["duration_type"] == "unlimited":
+        return None
+    if coupon["duration_type"] == "end_date" and coupon.get("end_date"):
+        return coupon["end_date"]
+    if coupon["duration_type"] == "fixed":
+        amt = int(coupon.get("duration_amount") or 0)
+        unit = coupon.get("duration_unit") or "days"
+        delta = timedelta(days=amt) if unit == "days" else timedelta(days=amt * 30)
+        return (base + delta).isoformat()
+    return None
+
+
+async def _validate_coupon(code: str, plan: str, email: Optional[str] = None) -> dict:
+    code = (code or "").strip().upper()
+    if not code:
+        return {"valid": False, "reason": "Code required"}
+    c = await db.coupons.find_one({"code": code}, {"_id": 0})
+    if not c:
+        return {"valid": False, "reason": "Coupon not found"}
+    if not c.get("active", True):
+        return {"valid": False, "reason": "Coupon is inactive"}
+    if c["plan"] != plan:
+        return {"valid": False, "reason": f"This coupon only applies to the {c['plan'].title()} plan"}
+    # Email lock
+    if c["assignment_type"] == "email":
+        if not email or email.lower().strip() != (c.get("assigned_email") or "").lower().strip():
+            return {"valid": False, "reason": "This coupon is reserved for a specific email"}
+    # End-date check (expiration of the COUPON itself, not the access it grants)
+    if c["duration_type"] == "end_date" and c.get("end_date"):
+        try:
+            ed = datetime.fromisoformat(c["end_date"].replace("Z", "+00:00"))
+            if now_utc() > ed:
+                return {"valid": False, "reason": "Coupon has expired"}
+        except Exception:
+            pass
+    # Usage limit
+    if c["usage_limit_type"] != "unlimited":
+        used = int(c.get("usage_count") or 0)
+        limit = 1 if c["usage_limit_type"] == "single" else int(c.get("usage_limit") or 1)
+        if used >= limit:
+            return {"valid": False, "reason": "Coupon usage limit reached"}
+    return {"valid": True, "coupon": c}
+
+
+@api.post("/coupons/validate")
+async def public_validate_coupon(body: CouponValidateIn):
+    """Public — used by checkout pages."""
+    res = await _validate_coupon(body.code, body.plan, body.email)
+    if not res["valid"]:
+        return {"valid": False, "reason": res["reason"]}
+    c = res["coupon"]
+    return {
+        "valid": True,
+        "code": c["code"],
+        "label": c.get("label", ""),
+        "discount_type": c["discount_type"],
+        "discount_value": c["discount_value"],
+        "plan": c["plan"],
+    }
+
+
+@api.get("/ceo/coupons")
+async def ceo_list_coupons(user: dict = Depends(require_ceo)):
+    rows = await db.coupons.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return {"coupons": rows}
+
+
+@api.post("/ceo/coupons")
+async def ceo_create_coupon(body: CouponIn, user: dict = Depends(require_ceo)):
+    code = body.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code required")
+    existing = await db.coupons.find_one({"code": code})
+    if existing:
+        raise HTTPException(status_code=400, detail="Code already exists")
+    data = body.model_dump()
+    data["code"] = code
+    if data["discount_type"] == "free":
+        data["discount_value"] = 100
+    elif not (1 <= int(data.get("discount_value", 0)) <= 99):
+        raise HTTPException(status_code=400, detail="Percent discount must be 1–99")
+    coupon = {
+        "id": str(uuid.uuid4()),
+        **data,
+        "usage_count": 0,
+        "created_at": now_iso(),
+        "created_by": user["id"],
+    }
+    await db.coupons.insert_one(coupon)
+    coupon.pop("_id", None)
+    await db.activity_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "type": "purple",
+        "text": f"<strong>CEO</strong> created coupon <code>{code}</code> for {data['plan']}",
+        "at": now_iso(),
+    })
+    return {"coupon": coupon}
+
+
+@api.patch("/ceo/coupons/{cid}")
+async def ceo_update_coupon(cid: str, body: CouponIn, user: dict = Depends(require_ceo)):
+    upd = body.model_dump()
+    upd["code"] = upd["code"].strip().upper()
+    if upd["discount_type"] == "free":
+        upd["discount_value"] = 100
+    await db.coupons.update_one({"id": cid}, {"$set": upd})
+    return {"ok": True}
+
+
+@api.patch("/ceo/coupons/{cid}/toggle")
+async def ceo_toggle_coupon(cid: str, user: dict = Depends(require_ceo)):
+    c = await db.coupons.find_one({"id": cid})
+    if not c:
+        raise HTTPException(status_code=404, detail="Not found")
+    new_active = not c.get("active", True)
+    await db.coupons.update_one({"id": cid}, {"$set": {"active": new_active}})
+    return {"ok": True, "active": new_active}
+
+
+@api.delete("/ceo/coupons/{cid}")
+async def ceo_delete_coupon(cid: str, user: dict = Depends(require_ceo)):
+    await db.coupons.delete_one({"id": cid})
+    return {"ok": True}
+
+
+@api.get("/ceo/coupon-redemptions")
+async def ceo_coupon_redemptions(user: dict = Depends(require_ceo)):
+    rows = await db.coupon_redemptions.find({}, {"_id": 0}).sort("redeemed_at", -1).limit(500).to_list(500)
+    return {"redemptions": rows}
 
 
 @app.on_event("startup")

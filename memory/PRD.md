@@ -61,7 +61,8 @@ Platform Overview · Activity Log · User Management · All Projects (with overr
 ## Test coverage
 - Iteration 1: 25/25 backend, frontend critical flows passed
 - Iteration 2: 17 new endpoints, 100% backend (42/42 total)
-- Iteration 3: 17 new endpoints, **100% backend (59/59 total), 100% frontend testid coverage**
+- Iteration 3: 17 new endpoints, **100% backend (59/59 total), 100% frontend testid coverage** — 2 minor UX issues flagged
+- Iteration 4 (Feb 2026): **Both iteration_3 frontend issues RESOLVED.** AffiliateHub copy-link/copy-code hardened with `window.isSecureContext` guard + `Promise.resolve` wrapper + `document.execCommand` fallback (no more runtime overlay). Period toggle now drives both the chart card AND the `stat-mtd` card (label + amount + MTD/QTD/YTD suffix). New testids: `stat-mtd-amount`, `stat-mtd-period`. 100% (8/8) frontend assertions pass, 0 pageerrors.
 
 ## MOCKED in dev (clearly indicated; live in production)
 - Stripe charges (all flows — toggle via `STRIPE_MODE=live`)

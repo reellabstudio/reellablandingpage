@@ -20,7 +20,7 @@ export default function Register() {
     if (!form.last_name.trim()) return setErr("Last name is required.");
     setLoading(true);
     try {
-      await register(form);
+      await register({ ...form, first_name: form.first_name.trim(), last_name: form.last_name.trim() });
       navigate("/legal");
     } catch (e2) {
       setErr(formatErr(e2.response?.data?.detail) || e2.message);

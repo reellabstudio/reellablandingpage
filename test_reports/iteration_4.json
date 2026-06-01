@@ -1,0 +1,24 @@
+{
+  "summary": "v4 frontend-only re-test of 2 minor bugs flagged in iteration_3 on /sparks (AffiliateHub). Both fixes verified PASS. (1) copy-link and copy-code buttons no longer surface 'Uncaught runtime errors' overlay — wrapped in try/catch with isSecureContext guard + Promise.resolve + document.execCommand fallback. Toasts 'Link copied' and 'Code copied' fire correctly (clipboard succeeded under HTTPS). Zero pageerrors, zero console errors observed during clicks. (2) period toggle (period-monthly/quarterly/annual) now drives BOTH the chart-card AND the separate stat-mtd card: stat-mtd .stat-label cycles 'THIS MONTH'->'THIS QUARTER'->'THIS YEAR', new testid stat-mtd-period cycles MTD->QTD->YTD, stat-mtd-amount reads from periodMap[period], and period-label (MONTH-TO-DATE/QUARTER-TO-DATE/YEAR-TO-DATE) + period-amount update in lock-step. Regression sweep: all 12 previously verified testids render (referral-link-card, copy-link, copy-code, stat-total-earned, stat-active-sparks, stat-mtd, stat-ytd, commission-chart-card, period-label, period-amount, sparks-list + 'Your Constellation' heading). New testids stat-mtd-amount and stat-mtd-period present and reactive.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_4.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "copy() implementation in AffiliateHub.jsx is solid: checks window.isSecureContext, typeof navigator.clipboard.writeText==='function', wraps in Promise.resolve(...).catch(fallback), and outer try/catch falls back to execCommand. fallbackCopy itself is also wrapped in try/catch. This pattern should be extracted into /app/frontend/src/lib/clipboard.js if any other page needs copy-to-clipboard.",
+    "stat-mtd card now correctly derives from periodMap[period] state — single source of truth shared with period-amount in chart card. Good.",
+    "Stat 'stat-ytd' card to the right of stat-mtd still always shows YTD regardless of toggle — this is intentional (it's a fixed YTD anchor while stat-mtd is the toggled view); no action needed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "skipped (per request)", "frontend": "100% (8/8 assertions PASS, 0 pageerrors, 0 console errors)"},
+  "test_credentials": "Fresh user registered via POST /api/auth/register with display_name + username + email + password ; followed by POST /api/auth/legal-accept {terms,code_of_conduct,tos}. CEO ceo@reellabstudio.com / ReelLabceo26! also available but redirects to /ceo so unsuitable for /sparks (we used fresh user TEST_v4_<uuid>).",
+  "seed_data_creation": "1 fresh user TEST_v4_<hex8>@example.com created via API for /sparks access. No commissions / sparks created.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Both iteration_3 minor bugs are RESOLVED in iteration_4. /sparks is now clean: 12 legacy + 2 new testids (stat-mtd-amount, stat-mtd-period) all reactive to period state. Test ran against REACT_APP_BACKEND_URL=https://reellab-backoffice.preview.emergentagent.com over HTTPS so navigator.clipboard.writeText succeeded; fallbackCopy path was not exercised but the guard logic (window.isSecureContext + typeof check + try/catch) ensures no overlay even when clipboard API throws. To force-test fallback, monkey-patch navigator.clipboard to throw before clicking copy-link. Register payload requires: {email, password, display_name, username} — username is REQUIRED (422 if missing).",
+  "rca of the issue": "N/A — both bugs fixed and verified resolved."
+}

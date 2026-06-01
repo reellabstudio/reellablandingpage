@@ -15,30 +15,35 @@ export default function AffiliateHub() {
     api.get("/affiliate/me").then((r) => setData(r.data));
   }, []);
 
-  const copy = (val, label) => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(val).then(() => showToast(`${label} copied`)).catch(() => fallbackCopy(val, label));
-      } else {
-        fallbackCopy(val, label);
-      }
-    } catch {
-      fallbackCopy(val, label);
-    }
-  };
   const fallbackCopy = (val, label) => {
     try {
       const ta = document.createElement("textarea");
       ta.value = val;
+      ta.setAttribute("readonly", "");
       ta.style.position = "fixed";
+      ta.style.top = "-1000px";
       ta.style.opacity = "0";
       document.body.appendChild(ta);
       ta.select();
+      ta.setSelectionRange(0, val.length);
       document.execCommand("copy");
       document.body.removeChild(ta);
       showToast(`${label} copied`);
     } catch {
       showToast(`Couldn't copy — please copy manually`);
+    }
+  };
+  const copy = (val, label) => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function" && window.isSecureContext) {
+        Promise.resolve(navigator.clipboard.writeText(val))
+          .then(() => showToast(`${label} copied`))
+          .catch(() => fallbackCopy(val, label));
+      } else {
+        fallbackCopy(val, label);
+      }
+    } catch {
+      fallbackCopy(val, label);
     }
   };
 
@@ -83,9 +88,9 @@ export default function AffiliateHub() {
           <div style={{ fontSize: 11, color: "var(--text-sec)", marginTop: 4, fontFamily: "'DM Mono', monospace" }}>{data.cancelled_sparks} cancelled</div>
         </div>
         <div className="stat-card" data-testid="stat-mtd">
-          <div className="stat-label"><TrendingUp size={11} style={{ display: "inline", marginRight: 4 }} />This month</div>
-          <div className="stat-num">${data.mtd.toFixed(2)}</div>
-          <div style={{ fontSize: 11, color: "var(--text-sec)", marginTop: 4, fontFamily: "'DM Mono', monospace" }}>MTD</div>
+          <div className="stat-label"><TrendingUp size={11} style={{ display: "inline", marginRight: 4 }} />{period === "monthly" ? "This month" : period === "quarterly" ? "This quarter" : "This year"}</div>
+          <div className="stat-num" data-testid="stat-mtd-amount">${(periodMap[period] || 0).toFixed(2)}</div>
+          <div style={{ fontSize: 11, color: "var(--text-sec)", marginTop: 4, fontFamily: "'DM Mono', monospace" }} data-testid="stat-mtd-period">{period === "monthly" ? "MTD" : period === "quarterly" ? "QTD" : "YTD"}</div>
         </div>
         <div className="stat-card" data-testid="stat-ytd">
           <div className="stat-label">Year to date</div>

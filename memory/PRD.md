@@ -56,8 +56,8 @@ Platform Overview · Activity Log · User Management · All Projects · Pricing 
 Verified clean: /invoices, /content-studio, /editor, /founder-checkout — NO "MOCKED" text anywhere visible to users.
 
 ## Test coverage
-- Iteration 1–6: scaffolding → 90%+ MVP → Stripe LIVE → SMTP LIVE → first/last/Content Studio/Access Control
-- Iteration 7 (Feb 2026): AI Editor "Schedule this" deep-link + /plan-checkout coupon flow. Backend 10/10 pytest. Fixed PlanCheckout runtime crash (object-literal eager-eval bug on null coupon.info) + auth-loading race (now waits for `user === null` instead of `!user`). End-to-end verified: LAUNCH50 ($49 → $24.50), Content Studio deep-link auto-opens pre-filled post-modal with TikTok pill selected.
+- Iteration 1–7: scaffolding → 90%+ MVP → Stripe LIVE → SMTP LIVE → first/last/Content Studio/Access Control → AI Editor deep-link + /plan-checkout coupons
+- Iteration 8 (Feb 2026 — pricing v8): **100% pass, 11/11 backend pytest, all v8 frontend flows verified.** New regular prices Creator $79/mo ($780/yr) and Studio $199/mo ($2028/yr). Founder Circle locked-for-life $49 Creator / $149 Studio, capped at 100 members. Auto-switch to regular pricing once 100 founders reached. Founder count card in CEO Overview. DB migration moves cached pricing from v7 → v8 defaults on startup.
 
 ## Backlog (P2, post-launch)
 - Real AI moment detection for /editor (Replicate / Whisper + LLM scoring)

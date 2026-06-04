@@ -138,11 +138,17 @@ export default function CEOBackOffice() {
 function Overview({ showToast }) {
   const [data, setData] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [founder, setFounder] = useState(null);
   useEffect(() => {
     (async () => {
-      const [ov, ac] = await Promise.all([api.get("/ceo/overview"), api.get("/ceo/activity")]);
+      const [ov, ac, pr] = await Promise.all([
+        api.get("/ceo/overview"),
+        api.get("/ceo/activity"),
+        api.get("/pricing"),
+      ]);
       setData(ov.data);
       setActivity(ac.data.activity.slice(0, 8));
+      setFounder(pr.data.founder);
     })();
   }, []);
   if (!data) return <div className="spinner" />;
@@ -151,8 +157,14 @@ function Overview({ showToast }) {
       <div className="grid-4" style={{ marginBottom: 24 }}>
         <Metric label="Total Users" val={data.users} change="+12% MoM" up />
         <Metric label="Active Projects" val={data.projects} change={`${data.paid_invoices}/${data.invoices} paid`} up />
+        <Metric
+          label="Founder Members"
+          val={founder ? `${founder.count} / ${founder.cap}` : "—"}
+          change={founder?.available ? `${founder.spots_left} spots left` : "✓ Sold out — regular pricing live"}
+          up={founder?.available}
+          testid="ceo-founder-stat"
+        />
         <Metric label="Community Posts" val={data.community_posts} change="growing" up />
-        <Metric label="Paid Revenue" val={`$${(data.paid_invoices * 199).toLocaleString()}`} change="mocked" />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 16 }}>
         <div className="card">
@@ -180,8 +192,8 @@ function Overview({ showToast }) {
     </div>
   );
 }
-const Metric = ({ label, val, change, up }) => (
-  <div className="metric-card">
+const Metric = ({ label, val, change, up, testid }) => (
+  <div className="metric-card" data-testid={testid}>
     <div className="metric-label">{label}</div>
     <div className="metric-val">{val}</div>
     <div className={`metric-change ${up ? "up" : "down"}`}>{change}</div>

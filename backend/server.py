@@ -339,9 +339,16 @@ class CouponValidateIn(BaseModel):
 
 DEFAULT_PRICING = {
     "solo": {"monthly": 19.0, "yearly": 180.0},
-    "creator": {"monthly": 49.0, "yearly": 468.0},
-    "studio": {"monthly": 199.0, "yearly": 1908.0},
+    "creator": {"monthly": 79.0, "yearly": 780.0},
+    "studio": {"monthly": 199.0, "yearly": 2028.0},
 }
+
+# Founder Circle locked-for-life pricing (one-time $1 entry + recurring at these rates)
+FOUNDER_PRICING = {
+    "creator": {"monthly": 49.0, "yearly": 588.0},   # $49/mo billed monthly
+    "studio": {"monthly": 149.0, "yearly": 1788.0},   # $149/mo billed monthly
+}
+FOUNDER_CAP = 100
 
 DEFAULT_SETTINGS = {
     "new_signups": True,
@@ -363,13 +370,13 @@ DEFAULT_EMAILS = {
 
 # Stripe pricing (server-defined — never trust client)
 STRIPE_PACKAGES = {
-    "founder_circle": {"amount": 1.00, "label": "Founder Circle Membership", "description": "Lifetime status · first month of Creator free"},
+    "founder_circle": {"amount": 1.00, "label": "Founder Circle Membership", "description": "Lifetime founder status — locked-for-life rate"},
     "solo_monthly": {"amount": 19.00, "label": "Solo Plan · Monthly"},
     "solo_yearly": {"amount": 180.00, "label": "Solo Plan · Yearly"},
-    "creator_monthly": {"amount": 49.00, "label": "Creator Plan · Monthly"},
-    "creator_yearly": {"amount": 468.00, "label": "Creator Plan · Yearly"},
+    "creator_monthly": {"amount": 79.00, "label": "Creator Plan · Monthly"},
+    "creator_yearly": {"amount": 780.00, "label": "Creator Plan · Yearly"},
     "studio_monthly": {"amount": 199.00, "label": "Studio Plan · Monthly"},
-    "studio_yearly": {"amount": 1908.00, "label": "Studio Plan · Yearly"},
+    "studio_yearly": {"amount": 2028.00, "label": "Studio Plan · Yearly"},
     "ai_processing": {"amount": 19.00, "label": "AI Video Processing"},
 }
 
@@ -457,6 +464,7 @@ class CheckoutInitIn(BaseModel):
     referral_code: Optional[str] = ""
     coupon_code: Optional[str] = ""
     ab_variant: Optional[str] = ""
+    founder_tier: Optional[Literal["creator", "studio"]] = "creator"
 
 
 class ABImpressionIn(BaseModel):
@@ -1120,10 +1128,41 @@ async def join_founder_circle(body: FounderIn):
 
 
 # ---------- Public: Pricing & Public FAQ ----------
+async def _founder_count() -> int:
+    return await db.payment_transactions.count_documents({
+        "package_id": "founder_circle",
+        "payment_status": "paid",
+    })
+
+
+@api.get("/public/founder-status")
+async def public_founder_status():
+    count = await _founder_count()
+    available = count < FOUNDER_CAP
+    return {
+        "count": count,
+        "cap": FOUNDER_CAP,
+        "spots_left": max(0, FOUNDER_CAP - count),
+        "available": available,
+    }
+
+
 @api.get("/pricing")
 async def get_pricing():
     doc = await db.settings.find_one({"key": "pricing"}, {"_id": 0})
-    return {"pricing": doc.get("value", DEFAULT_PRICING) if doc else DEFAULT_PRICING}
+    base = doc.get("value", DEFAULT_PRICING) if doc else DEFAULT_PRICING
+    count = await _founder_count()
+    return {
+        "pricing": base,
+        "founder": {
+            "tiers": FOUNDER_PRICING,
+            "cap": FOUNDER_CAP,
+            "count": count,
+            "spots_left": max(0, FOUNDER_CAP - count),
+            "available": count < FOUNDER_CAP,
+            "entry_fee": 1.00,
+        },
+    }
 
 
 @api.get("/public/faq")
@@ -1378,6 +1417,15 @@ async def create_checkout(body: CheckoutInitIn, request: Request):
     pkg = STRIPE_PACKAGES[body.package_id]
     amount = float(pkg["amount"])
 
+    # Founder Circle cap enforcement — once 100 founders are paid, the offer closes
+    if body.package_id == "founder_circle":
+        existing = await _founder_count()
+        if existing >= FOUNDER_CAP:
+            raise HTTPException(
+                status_code=410,
+                detail=f"Founder Circle is sold out — all {FOUNDER_CAP} spots have been claimed.",
+            )
+
     # Coupon validation + discount application (server-side only — never trust client)
     coupon_applied = None
     free_via_coupon = False
@@ -1408,6 +1456,7 @@ async def create_checkout(body: CheckoutInitIn, request: Request):
         "referral_code": body.referral_code or "",
         "coupon_code": coupon_applied or "",
         "ab_variant": body.ab_variant or "",
+        "founder_tier": body.founder_tier or "creator",
     }
 
     tx_id = str(uuid.uuid4())
@@ -1573,17 +1622,27 @@ async def _finalize_payment(tx: dict, new_status: str):
             }},
             upsert=True,
         )
-        # If user exists, mark them as founder + studio_owner with locked Creator pricing
+        # If user exists, mark them as founder with their chosen locked tier
+        founder_tier = (meta.get("founder_tier") or "creator").lower()
+        if founder_tier not in ("creator", "studio"):
+            founder_tier = "creator"
+        founder_locked_amount = FOUNDER_PRICING.get(founder_tier, {}).get("monthly", 49.0)
         user = await db.users.find_one({"email": email}) if email else None
         if user:
             await db.users.update_one(
                 {"id": user["id"]},
-                {"$set": {"is_founder": True, "founder_locked_price": True, "plan": "creator"}},
+                {"$set": {
+                    "is_founder": True,
+                    "founder_locked_price": True,
+                    "founder_locked_plan": founder_tier,
+                    "founder_locked_amount": founder_locked_amount,
+                    "plan": founder_tier,
+                }},
             )
         await db.activity_log.insert_one({
             "id": str(uuid.uuid4()),
             "type": "purple",
-            "text": f"<strong>{meta.get('name', email)}</strong> joined the Founder Circle (paid $1)",
+            "text": f"<strong>{meta.get('name', email)}</strong> joined the Founder Circle (paid $1, locked {founder_tier.title()} ${founder_locked_amount}/mo for life)",
             "at": now_iso(),
         })
 
@@ -2195,8 +2254,23 @@ async def on_startup():
 
 
     # Seed default settings, pricing, FAQ, email templates (idempotent)
-    if not await db.settings.find_one({"key": "pricing"}):
+    pricing_doc = await db.settings.find_one({"key": "pricing"})
+    if not pricing_doc:
         await db.settings.insert_one({"key": "pricing", "value": DEFAULT_PRICING, "updated_at": now_iso()})
+    else:
+        # Migration: if any cached value matches the legacy pre-v8 numbers, sync to new defaults
+        cur = pricing_doc.get("value") or {}
+        legacy = (
+            cur.get("creator", {}).get("monthly") == 49.0
+            or cur.get("creator", {}).get("yearly") == 468.0
+            or cur.get("studio", {}).get("yearly") == 1908.0
+        )
+        if legacy:
+            await db.settings.update_one(
+                {"key": "pricing"},
+                {"$set": {"value": DEFAULT_PRICING, "updated_at": now_iso()}},
+            )
+            logger.info("Migrated cached pricing to v8 defaults (Creator 79 / Studio 199 regular)")
     if not await db.settings.find_one({"key": "platform"}):
         await db.settings.insert_one({"key": "platform", "value": DEFAULT_SETTINGS, "updated_at": now_iso()})
     if not await db.settings.find_one({"key": "email_templates"}):

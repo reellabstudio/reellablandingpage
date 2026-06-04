@@ -1,0 +1,49 @@
+{
+  "summary": "Iteration 8 — v8 pricing structure update. Backend: 11/11 pytest pass (new defaults Creator $79/$780, Studio $199/$2028; founder block with cap=100, entry_fee=$1, tiers creator $49 / studio $149; founder_tier propagated into payment_transactions.metadata as 'studio' on POST /api/payments/checkout; default tier is 'creator' when omitted; bad tier 422; pricing migration applied — settings.pricing now matches v8 defaults; mongo verified directly). Frontend: ALL critical v8 features verified end-to-end. /pricing shows Creator $79 / Studio $199 / Solo $19 monthly; Yearly toggle correctly shows $65 (780/12), $169 (2028/12), $15; founder-banner renders with '97 of 100 spots remaining', '$1 once', '$49/mo Creator', '$149/mo Studio', and founder-banner-cta navigates to /founder-checkout. /founder-checkout: founder-spots shows '97 of 100 founder spots remaining' (teal accent), founder-tier-picker with creator/studio buttons, default selection is Creator ($49.00/mo), clicking Studio updates summary-tier-amt to '$149.00 / mo', updates 'Then $149/mo · Cancel anytime' subtitle, and applies purple border (rgb(123,79,212)) to Studio button while Creator stays at default border. Submit POST to /api/payments/checkout sends founder_tier='studio' in payload (verified via page.on('request') interception). Sold-out gate: mocked /api/pricing → available=false renders [data-testid='founder-soldout'] with [data-testid='soldout-see-pricing'] link and no form. /pricing with available=false renders [data-testid='founder-soldout-banner']. CEO Back Office /ceo Overview shows [data-testid='ceo-founder-stat'] = 'FOUNDER MEMBERS · 3 / 100 · 97 spots left' — 'Paid Revenue · mocked' card removed. No 'MOCKED' text on /pricing, /founder-checkout, or /ceo. Backend startup log confirms 'Migrated cached pricing to v8 defaults (Creator 79 / Studio 199 regular)'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "verified_working": [
+    "GET /api/pricing returns pricing.solo {19,180}, creator {79,780}, studio {199,2028} + founder block",
+    "GET /api/pricing founder block: tiers.creator.monthly=49, tiers.studio.monthly=149, cap=100, entry_fee=1.0, count=3, spots_left=97, available=true",
+    "GET /api/public/founder-status returns matching {count, cap:100, spots_left, available} shape and matches pricing.founder",
+    "POST /api/payments/checkout with founder_tier='studio' inserts payment_transactions row with metadata.founder_tier='studio'",
+    "POST /api/payments/checkout omitting founder_tier defaults metadata.founder_tier='creator'",
+    "POST /api/payments/checkout with founder_tier='platinum' returns 422 (Pydantic Literal validation)",
+    "Founder cap check: code path `existing >= FOUNDER_CAP → raise 410` confirmed at server.py:1421-1427; current count=3 so 200 OK as expected",
+    "_finalize_payment writes user.is_founder=true, founder_locked_plan, founder_locked_amount, plan (verified via code review at server.py:1626-1640)",
+    "settings.pricing in mongo migrated to v8 defaults; backend.err.log line 617: 'Migrated cached pricing to v8 defaults (Creator 79 / Studio 199 regular)'",
+    "/pricing renders v8 monthly prices and yearly /12 prices, both yearly notes correct ($780/year · Save 18%, $2,028/year · Save 15%)",
+    "/pricing founder-banner + founder-banner-cta render when available=true; sold-out banner when available=false",
+    "/founder-checkout founder-spots, founder-tier-picker, founder-tier-creator, founder-tier-studio all present with correct prices",
+    "Clicking founder-tier-studio updates summary-tier-amt to '$149.00 / mo', subtitle to 'Then $149/mo · Cancel anytime', and applies purple border (rgb(123,79,212))",
+    "Default founder tier on page load is creator ($49.00 / mo in summary)",
+    "Submit POST to /api/payments/checkout from /founder-checkout includes founder_tier in body (verified via request interception)",
+    "/founder-checkout with mocked available=false immediately renders [data-testid='founder-soldout'] + [data-testid='soldout-see-pricing'], no form rendered",
+    "CEO /ceo Overview shows [data-testid='ceo-founder-stat'] '3 / 100' with '97 spots left' subtitle; 'Paid Revenue · mocked' card removed",
+    "No 'MOCKED' or 'mocked' literal text on /pricing, /founder-checkout, /ceo (Overview)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v8.py",
+    "/app/test_reports/pytest/pytest_v8.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:2261-2273 — migration heuristic correctly detects legacy v7 numbers (creator.monthly==49 OR creator.yearly==468 OR studio.yearly==1908) and overwrites with DEFAULT_PRICING. Idempotent on re-runs since values then match v8. Good.",
+    "server.py:467 — CheckoutInitIn.founder_tier defaults to 'creator' via Pydantic; server.py:1626-1628 additionally guards `if founder_tier not in ('creator','studio'): founder_tier = 'creator'` — defensive double-check on _finalize_payment is correct.",
+    "server.py:1421-1427 — founder cap is enforced in /api/payments/checkout BEFORE the Stripe session is created. Good — prevents a 101st checkout session from ever opening. Note: this is not atomic against concurrent 100th+101st requests; a transactional count-and-insert would be safer but acceptable for now given the 1-time $1 model.",
+    "Pricing.jsx — Yearly /mo display uses Math.round(yearly/12) which produces 780/12=65 and 2028/12=169 exactly. Correct.",
+    "FounderCheckout.jsx — error 410 handling: setFounderStatus({available:false}) flips the render to <founder-soldout> on the next render without reload. Verified via mocked route. Good UX.",
+    "CEOBackOffice.jsx:165 — uses prop `testid` (not `data-testid`) which the StatCard component must forward as data-testid. Verified rendered DOM exposes [data-testid='ceo-founder-stat']. OK.",
+    "POST body interception shows the literal payload key `founder_tier`. Code review confirms server.py:1459 writes metadata.founder_tier from body.founder_tier. End-to-end propagation OK."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v8.py"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% — all v8 features verified including Pricing v8 defaults, Yearly toggle math, founder banner, founder-checkout tier picker + summary update + purple border + network founder_tier propagation, sold-out gate via /api/pricing mock, CEO founder-stat card, no MOCKED text on key pages"},
+  "test_credentials": "CEO ceo@reellabstudio.com / ReelLabceo26! ; studio_owner jane.doe.test@reellabstudio.com / testpass123",
+  "seed_data_creation": "Backend tests created 3 short-lived payment_transactions rows (studio, default creator, explicit creator, regular creator_monthly) and cleaned them up after each test. Frontend submit created one Stripe session (cs_live_...) — not consumed. Current founder count still ~3.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 8 v8 pricing update is FULLY VERIFIED on both backend and frontend. backend_test_v8.py is a self-contained regression file — re-run it any time pricing or founder logic changes. The sold-out gate was tested by mocking /api/pricing and /api/public/founder-status at the browser level (no DB pollution). The 410 cap path was verified by code inspection + pydantic 422 path. If you need to test the real 410 path, the safest method is to set FOUNDER_CAP=3 (env override or temp constant) and replay the existing 3 paid rows — DO NOT seed 97 dummy paid rows.",
+  "stripe_safety": "No real charges. Frontend submit produced a cs_live_ session URL but it was never opened by a browser. Backend tests use the same checkout endpoint but only persist tx rows (which are cleaned up)."
+}

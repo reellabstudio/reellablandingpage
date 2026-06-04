@@ -55,9 +55,10 @@ export default function Pricing() {
   const [yearly, setYearly] = useState(false);
   const [pricing, setPricing] = useState({
     solo: { monthly: 19, yearly: 180 },
-    creator: { monthly: 49, yearly: 468 },
-    studio: { monthly: 199, yearly: 1908 },
+    creator: { monthly: 79, yearly: 780 },
+    studio: { monthly: 199, yearly: 2028 },
   });
+  const [founder, setFounder] = useState(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
@@ -65,6 +66,7 @@ export default function Pricing() {
       try {
         const { data } = await api.get("/pricing");
         setPricing(data.pricing);
+        setFounder(data.founder);
       } catch { /* ignore */ }
     })();
   }, []);
@@ -135,6 +137,45 @@ export default function Pricing() {
         {planCard("creator", "Creator", "For serious creators & artists ready to scale their output.", true)}
         {planCard("studio", "Studio", "For agencies, labels, and teams that run content at scale.")}
       </div>
+
+      {founder?.available && (
+        <div data-testid="founder-banner" style={{
+          maxWidth: 920, margin: "40px auto 0", padding: "28px 32px",
+          background: "linear-gradient(135deg, rgba(123,79,212,.12), rgba(15,155,122,.08))",
+          border: "1px solid var(--purple-border)", borderRadius: 18,
+          display: "grid", gridTemplateColumns: "1fr auto", gap: 32, alignItems: "center",
+        }}>
+          <div>
+            <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: ".14em", textTransform: "uppercase", color: "var(--purple-light)", marginBottom: 10 }}>
+              ✦ Founder Circle · Limited to {founder.cap} members
+            </div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "1.8rem", fontWeight: 400, lineHeight: 1.2, color: "var(--text)", marginBottom: 6 }}>
+              Pay <em style={{ color: "var(--purple-light)" }}>$1 once.</em> Lock <em style={{ color: "var(--purple-light)" }}>${(founder.tiers?.creator?.monthly || 49)}/mo Creator</em> or <em style={{ color: "var(--purple-light)" }}>${(founder.tiers?.studio?.monthly || 149)}/mo Studio</em> for life.
+            </div>
+            <div style={{ fontSize: 13, color: "var(--text-sec)", lineHeight: 1.6, maxWidth: 540 }}>
+              <strong style={{ color: "var(--teal)" }}>{founder.spots_left} of {founder.cap} spots remaining.</strong> Prices for everyone else go up the moment we hit 100. Your founder rate never moves.
+            </div>
+          </div>
+          <button
+            onClick={() => navigate("/founder-checkout")}
+            className="plan-btn"
+            data-testid="founder-banner-cta"
+            style={{ padding: "14px 28px", whiteSpace: "nowrap", cursor: "pointer", border: "none" }}
+          >
+            Claim Founder · $1 →
+          </button>
+        </div>
+      )}
+
+      {founder && !founder.available && (
+        <div data-testid="founder-soldout-banner" style={{
+          maxWidth: 920, margin: "40px auto 0", padding: "22px 28px",
+          background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 14,
+          textAlign: "center", color: "var(--text-sec)", fontSize: 14,
+        }}>
+          ✦ <strong style={{ color: "var(--text)" }}>Founder Circle is closed.</strong> All {founder.cap} lifetime spots have been claimed.
+        </div>
+      )}
 
       <div className="addons-section">
         <div className="addons-title">Add-ons & Extras</div>

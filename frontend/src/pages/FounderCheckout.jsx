@@ -51,6 +51,8 @@ export default function FounderCheckout() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [success, setSuccess] = useState(null);
+  const [founderTier, setFounderTier] = useState("creator"); // 'creator' | 'studio'
+  const [founderStatus, setFounderStatus] = useState(null);  // { count, cap, spots_left, available, tiers }
   const impressionFired = useRef(false);
 
   useEffect(() => {
@@ -72,6 +74,12 @@ export default function FounderCheckout() {
 
     // Payment mode (live → hide card form, Stripe Checkout handles it)
     api.get("/public/payment-mode").then((r) => setPaymentLive(!!r.data?.stripe_live)).catch(() => {});
+
+    // Founder status (count, cap, tier pricing)
+    api.get("/pricing").then((r) => {
+      const f = r.data?.founder;
+      if (f) setFounderStatus(f);
+    }).catch(() => {});
 
     if (refCode) {
       api.get(`/affiliate/lookup/${refCode}`).then((r) => {
@@ -105,6 +113,7 @@ export default function FounderCheckout() {
         handle: form.handle,
         referral_code: refCode,
         ab_variant: variant,
+        founder_tier: founderTier,
       });
       // Mocked path returns our /checkout/mock — simulate paid then show success
       if (data.mocked) {
@@ -120,6 +129,11 @@ export default function FounderCheckout() {
         window.location.href = data.url;
       }
     } catch (e) {
+      const status = e.response?.status;
+      if (status === 410) {
+        // Cap reached between page-load and submit
+        setFounderStatus((s) => s ? { ...s, available: false, spots_left: 0 } : { available: false, spots_left: 0, cap: 100, count: 100 });
+      }
       setErr(formatErr(e.response?.data?.detail) || "Payment failed. Please try again.");
     }
     setBusy(false);
@@ -160,6 +174,25 @@ export default function FounderCheckout() {
 
   const v = AB_VARIANTS[variant] || AB_VARIANTS.a;
 
+  // Sold-out gate — all 100 spots claimed
+  if (founderStatus && !founderStatus.available) {
+    return (
+      <div className="landing-page" data-testid="founder-soldout">
+        <nav className="landing-nav">
+          <Link to="/" className="rl-logo"><div className="rl-logo-mark">✦</div><span className="rl-logo-text">Reel<span>Lab</span></span></Link>
+        </nav>
+        <div className="page" style={{ paddingTop: 100, paddingBottom: 80, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="card fade-in" style={{ maxWidth: 460, width: "100%", textAlign: "center", padding: 40 }}>
+            <div style={{ width: 64, height: 64, background: "var(--surface3)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, color: "var(--purple-light)", margin: "0 auto 22px" }}>✦</div>
+            <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 400, lineHeight: 1.2, marginBottom: 14, color: "var(--text)" }}>The Founder Circle<br /><em style={{ color: "var(--purple-light)" }}>is closed.</em></h2>
+            <p style={{ fontSize: 14, color: "var(--text-sec)", fontWeight: 300, lineHeight: 1.7, marginBottom: 28 }}>All {founderStatus.cap} lifetime founder spots have been claimed. We'd love to have you on a regular plan — same product, normal pricing.</p>
+            <Link to="/pricing" className="btn-primary" style={{ display: "inline-block", padding: "12px 28px" }} data-testid="soldout-see-pricing">See pricing →</Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="landing-page" data-testid="founder-checkout-page" data-ab-variant={variant}>
       <nav className="landing-nav">
@@ -190,22 +223,74 @@ export default function FounderCheckout() {
               </div>
             )}
 
+            {founderStatus && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, marginBottom: 22, fontSize: 12, color: "var(--text-sec)" }} data-testid="founder-spots">
+                <span><strong style={{ color: "var(--teal)" }}>{founderStatus.spots_left} of {founderStatus.cap}</strong> founder spots remaining.</span>
+                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, letterSpacing: ".1em", color: "var(--text-dim)" }}>LOCKED FOR LIFE</span>
+              </div>
+            )}
+
+            {/* Tier picker — Creator vs Studio (founder-locked rates) */}
+            <div style={{ marginBottom: 22 }} data-testid="founder-tier-picker">
+              <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-dim)", marginBottom: 10 }}>Pick your lifetime plan</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  { k: "creator", name: "Creator", mo: founderStatus?.tiers?.creator?.monthly ?? 49, blurb: "Solo creators · AI Director · all exports" },
+                  { k: "studio",  name: "Studio",  mo: founderStatus?.tiers?.studio?.monthly  ?? 149, blurb: "Teams · client portals · 10 seats · API" },
+                ].map((t) => (
+                  <button
+                    key={t.k}
+                    type="button"
+                    onClick={() => setFounderTier(t.k)}
+                    data-testid={`founder-tier-${t.k}`}
+                    style={{
+                      textAlign: "left", padding: "14px 16px", borderRadius: 12,
+                      background: founderTier === t.k ? "var(--purple-glow)" : "var(--surface2)",
+                      border: `1.5px solid ${founderTier === t.k ? "var(--purple)" : "var(--border)"}`,
+                      cursor: "pointer", color: "var(--text)",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+                      <strong style={{ fontSize: 14 }}>{t.name}</strong>
+                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: founderTier === t.k ? "var(--purple-light)" : "var(--text-sec)" }}>${t.mo}/mo</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-sec)", lineHeight: 1.4 }}>{t.blurb}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="card" style={{ marginBottom: 24, padding: 24 }}>
               <div style={{ fontSize: 11, fontFamily: "'DM Mono', monospace", letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-dim)", marginBottom: 16 }}>What you're paying for</div>
-              {[
-                { label: "Founder Circle Membership", sub: "Lifetime status · locked forever", amt: "$1.00", cls: "" },
-                { label: "Creator Plan · Month 1", sub: "Full access · AI Director · unlimited exports", amt: "$49.00", cls: "strike" },
-                { label: "Founder discount applied", sub: "", amt: "−$49.00", cls: "discount" },
-              ].map((r) => (
-                <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
-                  <div><div style={{ fontSize: 14, color: "var(--text-sec)" }}>{r.label}</div>{r.sub && <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2, fontFamily: "'DM Mono', monospace" }}>{r.sub}</div>}</div>
-                  <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 15, color: r.cls === "discount" ? "var(--teal)" : "var(--text)", textDecoration: r.cls === "strike" ? "line-through" : "none" }}>{r.amt}</div>
-                </div>
-              ))}
-              <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 16, alignItems: "flex-start" }}>
-                <div><div style={{ fontSize: 15, fontWeight: 500 }}>Due today</div><div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", marginTop: 3 }}>Then $49/mo · Cancel anytime</div></div>
-                <div style={{ textAlign: "right" }}><div style={{ fontFamily: "'Playfair Display', serif", fontSize: "2rem" }}>$1</div><div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace" }}>First month free</div></div>
-              </div>
+              {(() => {
+                const lockedRate = founderTier === "studio"
+                  ? (founderStatus?.tiers?.studio?.monthly ?? 149)
+                  : (founderStatus?.tiers?.creator?.monthly ?? 49);
+                const tierName = founderTier === "studio" ? "Studio" : "Creator";
+                return (
+                  <>
+                    {[
+                      { label: "Founder Circle Membership", sub: "Lifetime status · rate locked forever", amt: "$1.00", cls: "" },
+                      { label: `${tierName} Plan · Locked for life`, sub: `$${lockedRate}/mo · never goes up`, amt: `$${lockedRate}.00 / mo`, cls: "" },
+                    ].map((r) => (
+                      <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
+                        <div><div style={{ fontSize: 14, color: "var(--text)" }}>{r.label}</div>{r.sub && <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2, fontFamily: "'DM Mono', monospace" }}>{r.sub}</div>}</div>
+                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 15, color: "var(--text)" }} data-testid={r.label.startsWith("Founder") ? "summary-entry" : "summary-tier-amt"}>{r.amt}</div>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 16, alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 500, color: "var(--text)" }}>Due today</div>
+                        <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace", marginTop: 3 }}>Then ${lockedRate}/mo · Cancel anytime</div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontFamily: "'Playfair Display', serif", fontSize: "2rem", color: "var(--text)" }} data-testid="founder-due-today">$1</div>
+                        <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'DM Mono', monospace" }}>Founder rate locked</div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             <div style={{ background: "linear-gradient(135deg, var(--surface) 0%, rgba(123,79,212,.05) 100%)", border: "1px solid var(--purple-border)", borderRadius: 16, padding: 24 }}>

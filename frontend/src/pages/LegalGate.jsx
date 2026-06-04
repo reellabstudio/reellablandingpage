@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import api, { formatErr } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
@@ -30,6 +30,8 @@ const DOCS = [
 export default function LegalGate() {
   const { refresh } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const next = searchParams.get("next");
   const [open, setOpen] = useState({ tc: false, coc: false, tos: false });
   const [checked, setChecked] = useState({ tc: false, coc: false, tos: false });
   const [err, setErr] = useState("");
@@ -42,7 +44,7 @@ export default function LegalGate() {
     try {
       await api.post("/auth/legal-accept", { terms: true, code_of_conduct: true, tos: true });
       await refresh();
-      navigate("/dashboard");
+      navigate(next || "/dashboard");
     } catch (e) {
       setErr(formatErr(e.response?.data?.detail) || e.message);
     }

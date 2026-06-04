@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { Logo } from "../components/Logo";
 import { LOGO_WORDMARK_WHITE, formatErr } from "../lib/api";
@@ -7,6 +7,8 @@ import { LOGO_WORDMARK_WHITE, formatErr } from "../lib/api";
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = params.get("next");
   const [form, setForm] = useState({ first_name: "", last_name: "", username: "", email: "", password: "" });
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -21,7 +23,7 @@ export default function Register() {
     setLoading(true);
     try {
       await register({ ...form, first_name: form.first_name.trim(), last_name: form.last_name.trim() });
-      navigate("/legal");
+      navigate(next ? `/legal?next=${encodeURIComponent(next)}` : "/legal");
     } catch (e2) {
       setErr(formatErr(e2.response?.data?.detail) || e2.message);
     }

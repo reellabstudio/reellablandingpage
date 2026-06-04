@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { Logo } from "../components/Logo";
 import { LOGO_WORDMARK_WHITE } from "../lib/api";
@@ -8,6 +8,8 @@ import { formatErr } from "../lib/api";
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = params.get("next");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
@@ -21,6 +23,7 @@ export default function Login() {
       const u = await login(email, password);
       if (u.role === "ceo") navigate("/ceo");
       else if (!u.legal_accepted) navigate("/legal");
+      else if (next) navigate(next);
       else navigate("/dashboard");
     } catch (e2) {
       setErr(formatErr(e2.response?.data?.detail) || e2.message);

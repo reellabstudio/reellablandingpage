@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../lib/api";
 import { Calendar as CalIcon, Plus, Trash2, Sparkles, Instagram, Music2, Youtube, Twitter, Facebook, X as XIcon } from "lucide-react";
 
@@ -18,6 +19,7 @@ const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
 export default function ContentStudio() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = useState("month"); // 'month' | 'week'
   const [cursor, setCursor] = useState(new Date());
   const [posts, setPosts] = useState([]);
@@ -30,6 +32,29 @@ export default function ContentStudio() {
     setPosts(data.posts || []);
   };
   useEffect(() => { load(); }, []);
+
+  // Deep-link from AI Editor: ?clip_url=...&platform=...&title=...
+  useEffect(() => {
+    const clipUrl = searchParams.get("clip_url");
+    const platform = searchParams.get("platform");
+    const title = searchParams.get("title");
+    if (!clipUrl && !platform && !title) return;
+    const validPlatform = ["instagram", "tiktok", "youtube", "x", "facebook"].includes(platform) ? platform : "instagram";
+    const dt = new Date();
+    dt.setHours(12, 0, 0, 0);
+    dt.setDate(dt.getDate() + 1);
+    setModal({
+      title: title || "Reel from AI Editor",
+      caption: "",
+      platform: validPlatform,
+      scheduled_for: dt.toISOString(),
+      media_url: clipUrl || "",
+      status: "scheduled",
+      notes: "",
+    });
+    // Clear params so refresh doesn't re-open the modal
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const grouped = useMemo(() => {
     const map = {};

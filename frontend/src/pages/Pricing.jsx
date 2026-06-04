@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api from "../lib/api";
 import HelpBotPublic from "../components/HelpBotPublic";
+import { useAuth } from "../lib/auth";
 
 const PLAN_FEATURES = {
   solo: [
@@ -49,6 +50,8 @@ const ADDONS = [
 ];
 
 export default function Pricing() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [yearly, setYearly] = useState(false);
   const [pricing, setPricing] = useState({
     solo: { monthly: 19, yearly: 180 },
@@ -71,6 +74,10 @@ export default function Pricing() {
   const planCard = (key, name, tagline, featured = false) => {
     const p = pricing[key];
     const monthly = yearly ? Math.round(p.yearly / 12) : p.monthly;
+    const ctaLabel = user ? `Upgrade to ${name} →` : "Get Early Access →";
+    const goTo = user
+      ? `/plan-checkout?plan=${key}&billing=${yearly ? "yearly" : "monthly"}`
+      : `/register?next=${encodeURIComponent(`/plan-checkout?plan=${key}&billing=${yearly ? "yearly" : "monthly"}`)}`;
     return (
       <div className={`plan-card ${featured ? "featured" : ""}`} data-testid={`plan-${key}`}>
         {featured && <div className="plan-most-popular" data-testid="plan-most-popular">Most Popular</div>}
@@ -85,9 +92,9 @@ export default function Pricing() {
             <li key={f} className="plan-feat"><div className="feat-check">✓</div>{f}</li>
           ))}
         </ul>
-        <Link to="/register" className="plan-btn" style={{ display: "block", textAlign: "center", textDecoration: "none" }} data-testid={`plan-${key}-cta`}>
-          Get Early Access →
-        </Link>
+        <button type="button" onClick={() => navigate(goTo)} className="plan-btn" style={{ display: "block", width: "100%", textAlign: "center", textDecoration: "none", cursor: "pointer", border: "none" }} data-testid={`plan-${key}-cta`}>
+          {ctaLabel}
+        </button>
       </div>
     );
   };

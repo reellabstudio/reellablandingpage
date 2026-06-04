@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
-import { Scissors, Zap, Square, Palette, Sparkles, Type, ArrowLeftRight, Music, Bot, Plus, Trash2, Upload, Play, Pause } from "lucide-react";
+import { Scissors, Zap, Square, Palette, Sparkles, Type, ArrowLeftRight, Music, Bot, Plus, Trash2, Upload, Play, Pause, CalendarPlus, Check } from "lucide-react";
 
 const CLIP_COLORS = {
   highlight: "#534AB7",
@@ -20,6 +21,7 @@ const PROCESSING_STAGES = [
 ];
 
 export default function AIEditor() {
+  const navigate = useNavigate();
   const [stage, setStage] = useState("upload"); // upload | processing | edit
   const [progress, setProgress] = useState(0);
   const [stageLabel, setStageLabel] = useState(PROCESSING_STAGES[0]);
@@ -34,6 +36,7 @@ export default function AIEditor() {
   const [propTab, setPropTab] = useState("clip");
   const [filename, setFilename] = useState("");
   const [toast, setToast] = useState(null);
+  const [exportReady, setExportReady] = useState(null); // { url, suggestedPlatform } | null
   const fileInput = useRef(null);
 
   // Load existing video projects on mount
@@ -164,8 +167,26 @@ export default function AIEditor() {
     saveTimeline([]);
   };
 
+  const suggestPlatform = (ratio) => {
+    if (ratio === "9:16") return "tiktok";
+    if (ratio === "1:1") return "instagram";
+    return "youtube";
+  };
+
   const exportVideo = () => {
-    showToast("✦ Export started — you'll get a download link when ready");
+    const exportUrl = (videoProject?.public_url || videoProject?.url || `https://reellabstudio.com/clips/${videoProject?.id || "preview"}.mp4`);
+    setExportReady({ url: exportUrl, suggestedPlatform: suggestPlatform(aspect) });
+    showToast("✦ Export started — share it below");
+  };
+
+  const scheduleThisClip = () => {
+    if (!exportReady) return;
+    const params = new URLSearchParams({
+      clip_url: exportReady.url,
+      platform: exportReady.suggestedPlatform,
+      title: filename || "Reel from AI Editor",
+    });
+    navigate(`/content-studio?${params.toString()}`);
   };
 
   const startNew = () => {
@@ -407,6 +428,21 @@ export default function AIEditor() {
                   </select>
                 </div>
                 <button className="btn-primary" style={{ width: "100%", padding: 10 }} onClick={exportVideo} data-testid="export-now">Export now</button>
+
+                {exportReady && (
+                  <div style={{ marginTop: 16, padding: 14, background: "var(--purple-glow)", border: "1px solid var(--purple-border)", borderRadius: 10 }} data-testid="export-ready-panel">
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      <Check size={14} style={{ color: "var(--teal)" }} />
+                      <strong style={{ fontSize: 13, color: "var(--text)" }}>Reel ready</strong>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--text-sec)", lineHeight: 1.55, marginBottom: 10 }}>
+                      Suggested platform: <strong style={{ color: "var(--purple-light)", textTransform: "capitalize" }}>{exportReady.suggestedPlatform}</strong>. Schedule this clip directly to your content calendar.
+                    </div>
+                    <button className="btn-secondary" style={{ width: "100%", padding: 10, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }} onClick={scheduleThisClip} data-testid="schedule-this-clip">
+                      <CalendarPlus size={14} /> Schedule this
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>

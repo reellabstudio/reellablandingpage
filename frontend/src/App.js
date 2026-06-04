@@ -26,6 +26,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 import ContentStudio from "./pages/ContentStudio";
+import PlanCheckout from "./pages/PlanCheckout";
 
 function Protected({ children, requireLegal = true }) {
   const { user } = useAuth();
@@ -81,6 +82,7 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/founder-checkout" element={<FounderCheckout />} />
+          <Route path="/plan-checkout" element={<PlanCheckout />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />

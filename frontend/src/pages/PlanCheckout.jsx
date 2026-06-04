@@ -25,7 +25,8 @@ export default function PlanCheckout() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
-    if (!user) {
+    if (user === undefined) return; // still loading
+    if (user === null) {
       navigate(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
@@ -68,6 +69,7 @@ export default function PlanCheckout() {
   };
 
   const proceed = async () => {
+    if (!user) return;
     setErr("");
     setBusy(true);
     try {
@@ -104,14 +106,17 @@ export default function PlanCheckout() {
   }
 
   const planInfo = PLANS[plan];
-  const couponHint = {
-    idle: "",
-    checking: "Checking…",
-    valid: couponState.info?.discount_type === "free"
-      ? `✓ ${couponState.info.code} — 100% off, full access`
-      : `✓ ${couponState.info.code} — ${couponState.info?.discount_value}% off ${planInfo.name}`,
-    invalid: couponState.error || "Coupon not valid.",
-  }[couponState.status];
+  const couponHint = (() => {
+    if (couponState.status === "idle") return "";
+    if (couponState.status === "checking") return "Checking…";
+    if (couponState.status === "invalid") return couponState.error || "Coupon not valid.";
+    if (couponState.status === "valid" && couponState.info) {
+      return couponState.info.discount_type === "free"
+        ? `✓ ${couponState.info.code} — 100% off, full access`
+        : `✓ ${couponState.info.code} — ${couponState.info.discount_value}% off ${planInfo.name}`;
+    }
+    return "";
+  })();
 
   return (
     <div className="landing-page" data-testid="plan-checkout-page">

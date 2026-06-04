@@ -56,15 +56,8 @@ Platform Overview · Activity Log · User Management · All Projects · Pricing 
 Verified clean: /invoices, /content-studio, /editor, /founder-checkout — NO "MOCKED" text anywhere visible to users.
 
 ## Test coverage
-- Iteration 1–5: scaffolding → 90%+ MVP → Stripe LIVE → SMTP LIVE
-- Iteration 6 (current): **100% backend (15/15 pytest), 100% frontend spec checklist.**
-  - Register first+last required ✓
-  - Nav audit (studio_owner: no Clients · CEO: Clients + Content Studio) ✓
-  - Invoices CEO-only creation, client-side read-only ✓
-  - Content Studio calendar + AI captions (live Claude) ✓
-  - Access Control with promotional + group_tag ✓
-  - MOCKED text fully removed ✓
-  - Stripe NOT charged in tests, but live mode verified ✓
+- Iteration 1–6: scaffolding → 90%+ MVP → Stripe LIVE → SMTP LIVE → first/last/Content Studio/Access Control
+- Iteration 7 (Feb 2026): AI Editor "Schedule this" deep-link + /plan-checkout coupon flow. Backend 10/10 pytest. Fixed PlanCheckout runtime crash (object-literal eager-eval bug on null coupon.info) + auth-loading race (now waits for `user === null` instead of `!user`). End-to-end verified: LAUNCH50 ($49 → $24.50), Content Studio deep-link auto-opens pre-filled post-modal with TikTok pill selected.
 
 ## Backlog (P2, post-launch)
 - Real AI moment detection for /editor (Replicate / Whisper + LLM scoring)

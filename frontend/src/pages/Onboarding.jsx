@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { ArrowRight, Check, Sparkles } from "lucide-react";
 
 const TYPES = ["UGC creator", "Personal brand", "Business / brand", "Agency / studio", "Other"];
@@ -9,6 +10,7 @@ const FREQS = ["1–2x / week", "3–5x / week", "Daily", "Less than weekly"];
 
 export default function Onboarding() {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [step, setStep] = useState(1);
   const [type, setType] = useState("");
   const [platforms, setPlatforms] = useState([]);
@@ -26,8 +28,8 @@ export default function Onboarding() {
         post_frequency: freq,
         tutorial_completed: true,
       }).catch(() => {});
-      // Always accept legal so we land on dashboard
       await api.post("/auth/legal-accept", { terms: true, code_of_conduct: true, tos: true }).catch(() => {});
+      await refresh();
       navigate("/dashboard");
     } catch { /* noop */ }
     setBusy(false);

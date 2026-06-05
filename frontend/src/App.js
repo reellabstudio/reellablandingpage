@@ -104,7 +104,7 @@ function App() {
           <Route path="/sparks" element={<Protected><AppShell><AffiliateHub /></AppShell></Protected>} />
           <Route path="/content-studio" element={<Protected><AppShell><ContentStudio /></AppShell></Protected>} />
           <Route path="/library" element={<Protected><AppShell><Library /></AppShell></Protected>} />
-          <Route path="/onboarding" element={<Protected><Onboarding /></Protected>} />
+          <Route path="/onboarding" element={<Protected requireLegal={false}><Onboarding /></Protected>} />
           <Route path="/ceo" element={<Protected requireLegal={false}><HelpBotWrapper><CEOBackOffice /></HelpBotWrapper></Protected>} />
 
           <Route path="*" element={<NotFound />} />

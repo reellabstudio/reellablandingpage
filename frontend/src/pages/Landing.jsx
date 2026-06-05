@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Scissors, Sparkles, Calendar, Send, Star, Check, ChevronDown } from "lucide-react";
 import api from "../lib/api";
+import { useAuth } from "../lib/auth";
 
 const FEATURES_TABLE = [
   ["Video edits / mo", "3", "15", "Unlimited"],
@@ -28,6 +29,7 @@ const FAQS = [
 ];
 
 export default function Landing() {
+  const { register } = useAuth();
   const [yearly, setYearly] = useState(true);
   const [openFaq, setOpenFaq] = useState(null);
   const [founder, setFounder] = useState({ available: true, spots_left: 67, cap: 100 });
@@ -53,7 +55,7 @@ export default function Landing() {
       const [first, ...rest] = signup.name.trim().split(/\s+/);
       const last = rest.join(" ") || "User";
       const username = (signup.email.split("@")[0] || "user").replace(/[^a-z0-9_]/gi, "").slice(0, 20) || `u${Date.now() % 100000}`;
-      await api.post("/auth/register", {
+      await register({
         email: signup.email,
         password: signup.password,
         first_name: first || "Creator",

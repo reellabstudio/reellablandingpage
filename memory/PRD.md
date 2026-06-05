@@ -56,8 +56,8 @@ Platform Overview · Activity Log · User Management · All Projects · Pricing 
 Verified clean: /invoices, /content-studio, /editor, /founder-checkout — NO "MOCKED" text anywhere visible to users.
 
 ## Test coverage
-- Iteration 1–7: scaffolding → 90%+ MVP → Stripe LIVE → SMTP LIVE → first/last/Content Studio/Access Control → AI Editor deep-link + /plan-checkout coupons
-- Iteration 8 (Feb 2026 — pricing v8): **100% pass, 11/11 backend pytest, all v8 frontend flows verified.** New regular prices Creator $79/mo ($780/yr) and Studio $199/mo ($2028/yr). Founder Circle locked-for-life $49 Creator / $149 Studio, capped at 100 members. Auto-switch to regular pricing once 100 founders reached. Founder count card in CEO Overview. DB migration moves cached pricing from v7 → v8 defaults on startup.
+- Iteration 1–8: scaffolding → MVP → Stripe LIVE → SMTP LIVE → Content Studio → A/B founder pricing
+- Iteration 9 (v9 — Feb 2026): **FULL REBUILD**. Backend 25/25 pytest. 100% frontend after 2 follow-up fixes (token persist on Landing signup + dynamic AI Edit modal message). End-to-end signup → onboarding → dashboard verified. Real integrations live (AWS S3, OpenAI Whisper, Shotstack, Anthropic). Free tier hard limits enforced. AI Edit add-ons ($12/$30/$50) wired through Stripe.
 
 ## Backlog (P2, post-launch)
 - Real AI moment detection for /editor (Replicate / Whisper + LLM scoring)

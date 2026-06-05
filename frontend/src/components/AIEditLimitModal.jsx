@@ -42,9 +42,11 @@ export default function AIEditLimitModal({ open, onClose, message }) {
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
           <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--purple-glow)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--purple-mid)" }}><Sparkles size={24} /></div>
         </div>
-        <h3 className="display-md" style={{ color: "var(--text)", textAlign: "center", margin: 0, marginBottom: 8 }}>You've used all 5 AI edits this month</h3>
+        <h3 className="display-md" style={{ color: "var(--text)", textAlign: "center", margin: 0, marginBottom: 8 }}>
+          {message ? "AI edit limit reached" : "You've used all your AI edits"}
+        </h3>
         <p style={{ color: "var(--text-sec)", textAlign: "center", fontSize: 13.5, marginBottom: 24, lineHeight: 1.5 }}>
-          {message || "Resets on your next billing cycle — or top up now to keep editing."}
+          {message || "Top up below or upgrade to keep editing."}
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 22 }}>
           {TIERS.map((t) => (

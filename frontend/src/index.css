@@ -1,36 +1,36 @@
-/* ReelLab Studio — design tokens & global styles (v2 official) */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap');
+/* ReelLab Studio — design tokens v9 (Sora + DM Sans) */
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,300&family=DM+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500&display=swap');
 
 :root {
-  /* Official purple ramp */
-  --purple: #7B4FD4;
+  /* Official purple ramp (v9) */
+  --purple: #7C5CBF;
   --purple-dark: #5A35A8;
-  --purple-mid: #9B6FE8;
+  --purple-mid: #9B6FE0;
   --purple-light: #C4AAFF;
-  --purple-glow: rgba(123, 79, 212, 0.16);
-  --purple-border: rgba(123, 79, 212, 0.26);
+  --purple-glow: rgba(124, 92, 191, 0.16);
+  --purple-border: rgba(124, 92, 191, 0.26);
 
-  /* Accents */
-  --teal: #0F9B7A;
-  --teal-light: rgba(15, 155, 122, 0.15);
-  --coral: #C44B2A;
-  --coral-light: rgba(196, 75, 42, 0.12);
-  --amber: #C4891A;
-  --amber-light: rgba(196, 137, 26, 0.12);
-  --gold: #C4891A;
+  /* Accents (v9) */
+  --teal: #1D9E75;
+  --teal-light: rgba(29, 158, 117, 0.15);
+  --coral: #E24B4A;
+  --coral-light: rgba(226, 75, 74, 0.12);
+  --amber: #BA7517;
+  --amber-light: rgba(186, 117, 23, 0.12);
+  --gold: #BA7517;
   --blue-verified: #5BA4E8;
 }
 
 [data-theme="dark"] {
-  --bg: #0B0B0F;
-  --surface: #13131A;
-  --surface2: #1A1A24;
-  --surface3: #22222E;
+  --bg: #0a0a0f;
+  --surface: #111118;
+  --surface2: #16161f;
+  --surface3: #1f1f2a;
   --border: rgba(255, 255, 255, 0.08);
-  --border2: rgba(255, 255, 255, 0.14);
-  --text: #FAF8FF;
-  --text-sec: #C8C2D6;
-  --text-dim: #8A85A0;
+  --border2: rgba(255, 255, 255, 0.12);
+  --text: #ffffff;
+  --text-sec: rgba(255, 255, 255, 0.7);
+  --text-dim: rgba(255, 255, 255, 0.4);
 }
 
 [data-theme="light"] {
@@ -56,7 +56,22 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
+  position: relative;
 }
+/* Noise texture overlay — 4% opacity */
+body::before {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.4 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+}
+#root { position: relative; z-index: 2; min-height: 100vh; }
+
+h1, h2, h3, h4, .display, .sora { font-family: 'Sora', system-ui, sans-serif; font-weight: 600; letter-spacing: -0.02em; }
+.display-xl { font-family: 'Sora', sans-serif; font-weight: 700; font-size: clamp(2.6rem, 6vw, 5.4rem); line-height: 1.05; letter-spacing: -0.04em; }
+.display-lg { font-family: 'Sora', sans-serif; font-weight: 700; font-size: clamp(2rem, 4vw, 3.2rem); line-height: 1.1; letter-spacing: -0.03em; }
+.display-md { font-family: 'Sora', sans-serif; font-weight: 600; font-size: clamp(1.4rem, 2.5vw, 1.9rem); line-height: 1.2; letter-spacing: -0.02em; }
 .mono { font-family: 'DM Mono', monospace; }
 .serif { font-family: 'Playfair Display', serif; }
 
@@ -71,35 +86,35 @@ input, textarea, select { font-family: inherit; }
 ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--purple); }
 
-/* === Buttons === */
+/* === Buttons (pill v9) === */
 .btn-primary {
-  padding: 10px 20px;
-  border-radius: 9px;
+  padding: 12px 22px;
+  border-radius: 100px;
   border: none;
   background: var(--purple);
   color: #fff;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   transition: background 0.15s, transform 0.1s;
 }
-.btn-primary:hover { background: var(--purple-dark); }
+.btn-primary:hover { background: var(--purple-mid); }
 .btn-primary:active { transform: scale(0.97); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .btn-secondary {
-  padding: 10px 20px;
-  border-radius: 9px;
-  border: 0.5px solid var(--border2);
-  background: var(--surface2);
+  padding: 12px 22px;
+  border-radius: 100px;
+  border: 1px solid var(--border2);
+  background: transparent;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
-.btn-secondary:hover { border-color: var(--purple); color: var(--purple-light); }
+.btn-secondary:hover { border-color: var(--purple); color: var(--purple-mid); }
 
 .btn-ghost {
-  padding: 8px 14px;
-  border-radius: 7px;
+  padding: 10px 18px;
+  border-radius: 100px;
   border: none;
   background: transparent;
   color: var(--text-sec);
@@ -136,10 +151,11 @@ input, textarea, select { font-family: inherit; }
 /* === Card === */
 .card {
   background: var(--surface);
-  border: 0.5px solid var(--border2);
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
   padding: 20px;
 }
+.card.featured { border: 1px solid var(--purple); }
 
 /* === Pills === */
 .pill {

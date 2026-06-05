@@ -247,7 +247,8 @@ function PostModal({ post, onChange, onClose, onSave, onDelete, busy }) {
       });
       setOptions(data.captions || []);
     } catch (e) {
-      setErr(e.response?.data?.detail || "Couldn't generate captions");
+      const d = e.response?.data?.detail;
+      setErr(typeof d === "string" ? d : (d?.message || "Couldn't generate captions"));
     }
     setGenBusy(false);
   };
@@ -354,7 +355,8 @@ function CaptionGenerator({ onClose, onUse }) {
       const { data } = await api.post("/content/caption/generate", { platform, topic, tone: "engaging" });
       setOptions(data.captions || []);
     } catch (e) {
-      setErr(e.response?.data?.detail || "Couldn't generate captions");
+      const d = e.response?.data?.detail;
+      setErr(typeof d === "string" ? d : (d?.message || "Couldn't generate captions"));
     }
     setBusy(false);
   };

@@ -33,6 +33,27 @@ try:
 except Exception:
     STRIPE_AVAILABLE = False
 
+# Real integrations: AWS S3, OpenAI Whisper, Anthropic, Shotstack
+import httpx
+import json as _json
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    BOTO_AVAILABLE = True
+except Exception:
+    BOTO_AVAILABLE = False
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except Exception:
+    OPENAI_AVAILABLE = False
+try:
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except Exception:
+    ANTHROPIC_AVAILABLE = False
+
+
 # ---------- Config & DB ----------
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGO = "HS256"
@@ -338,17 +359,34 @@ class CouponValidateIn(BaseModel):
 
 
 DEFAULT_PRICING = {
-    "solo": {"monthly": 19.0, "yearly": 180.0},
-    "creator": {"monthly": 79.0, "yearly": 780.0},
-    "studio": {"monthly": 199.0, "yearly": 2028.0},
+    "free": {"monthly": 0.0, "yearly": 0.0},
+    "creator": {"monthly": 89.0, "yearly": 900.0},   # $89/mo or $75/mo annual ($900/yr)
+    "studio": {"monthly": 199.0, "yearly": 2100.0},  # $199/mo or $175/mo annual ($2100/yr)
 }
 
-# Founder Circle locked-for-life pricing (one-time $1 entry + recurring at these rates)
+# Founder Circle locked-for-life pricing (one-time $50 entry + recurring $49 Creator)
 FOUNDER_PRICING = {
-    "creator": {"monthly": 49.0, "yearly": 588.0},   # $49/mo billed monthly
-    "studio": {"monthly": 149.0, "yearly": 1788.0},   # $149/mo billed monthly
+    "creator": {"monthly": 49.0, "yearly": 588.0},
 }
+FOUNDER_ENTRY_FEE = 50.0
 FOUNDER_CAP = 100
+
+# Tier limits — enforced server-side. -1 = unlimited
+TIER_LIMITS = {
+    "free":    {"edits": 3,  "ai_edits": 0,  "captions": 3,  "calendar_posts": 10},
+    "creator": {"edits": 15, "ai_edits": 5,  "captions": 30, "calendar_posts": -1},
+    "studio":  {"edits": -1, "ai_edits": -1, "captions": -1, "calendar_posts": -1},
+}
+
+# AI Edit add-on bundles (one-time Stripe payments)
+AI_EDIT_ADDONS = {
+    "ai_edits_1": {"amount": 12.00, "count": 1, "label": "1 AI Edit"},
+    "ai_edits_3": {"amount": 30.00, "count": 3, "label": "3 AI Edits"},
+    "ai_edits_5": {"amount": 50.00, "count": 5, "label": "5 AI Edits"},
+}
+
+# Affiliate (Sparks) commission — 20% recurring on all paid plan revenue
+AFFILIATE_RATE = 0.20
 
 DEFAULT_SETTINGS = {
     "new_signups": True,
@@ -370,13 +408,14 @@ DEFAULT_EMAILS = {
 
 # Stripe pricing (server-defined — never trust client)
 STRIPE_PACKAGES = {
-    "founder_circle": {"amount": 1.00, "label": "Founder Circle Membership", "description": "Lifetime founder status — locked-for-life rate"},
-    "solo_monthly": {"amount": 19.00, "label": "Solo Plan · Monthly"},
-    "solo_yearly": {"amount": 180.00, "label": "Solo Plan · Yearly"},
-    "creator_monthly": {"amount": 79.00, "label": "Creator Plan · Monthly"},
-    "creator_yearly": {"amount": 780.00, "label": "Creator Plan · Yearly"},
+    "founder_circle": {"amount": 50.00, "label": "Founder Circle Membership", "description": "Lifetime founder status — $49/mo Creator locked for life"},
+    "creator_monthly": {"amount": 89.00, "label": "Creator Plan · Monthly"},
+    "creator_yearly": {"amount": 900.00, "label": "Creator Plan · Annual ($75/mo)"},
     "studio_monthly": {"amount": 199.00, "label": "Studio Plan · Monthly"},
-    "studio_yearly": {"amount": 2028.00, "label": "Studio Plan · Yearly"},
+    "studio_yearly": {"amount": 2100.00, "label": "Studio Plan · Annual ($175/mo)"},
+    "ai_edits_1": {"amount": 12.00, "label": "1 AI Auto-Edit"},
+    "ai_edits_3": {"amount": 30.00, "label": "3 AI Auto-Edits"},
+    "ai_edits_5": {"amount": 50.00, "label": "5 AI Auto-Edits"},
     "ai_processing": {"amount": 19.00, "label": "AI Video Processing"},
 }
 
@@ -388,7 +427,7 @@ PACKAGE_TO_PLAN = {
 }
 
 # Affiliate commission rates
-COMMISSION_RATES = {"creator": 0.15, "studio": 0.30}
+COMMISSION_RATES = {"creator": AFFILIATE_RATE, "studio": AFFILIATE_RATE}
 
 
 def get_stripe() -> Optional[StripeCheckout]:
@@ -455,7 +494,7 @@ def make_referral_code(user_id: str) -> str:
 
 # ─── Additional Models ───
 class CheckoutInitIn(BaseModel):
-    package_id: Literal["founder_circle", "creator_monthly", "creator_yearly", "studio_monthly", "studio_yearly", "ai_processing", "solo_monthly", "solo_yearly"]
+    package_id: Literal["founder_circle", "creator_monthly", "creator_yearly", "studio_monthly", "studio_yearly", "ai_processing", "ai_edits_1", "ai_edits_3", "ai_edits_5"]
     origin_url: str
     name: Optional[str] = ""
     email: Optional[EmailStr] = None
@@ -1154,13 +1193,15 @@ async def get_pricing():
     count = await _founder_count()
     return {
         "pricing": base,
+        "limits": TIER_LIMITS,
+        "addons": AI_EDIT_ADDONS,
         "founder": {
             "tiers": FOUNDER_PRICING,
             "cap": FOUNDER_CAP,
             "count": count,
             "spots_left": max(0, FOUNDER_CAP - count),
             "available": count < FOUNDER_CAP,
-            "entry_fee": 1.00,
+            "entry_fee": FOUNDER_ENTRY_FEE,
         },
     }
 
@@ -1666,8 +1707,7 @@ async def _finalize_payment(tx: dict, new_status: str):
         plan = "creator" if pkg_id.startswith("creator_") else "studio"
         ref_code = meta.get("referral_code", "")
         if ref_code:
-            commission_rate = COMMISSION_RATES[plan]
-            commission_amount = tx["amount"] * commission_rate
+            commission_amount = tx["amount"] * AFFILIATE_RATE
             await db.affiliate_referrals.update_one(
                 {"referral_code": ref_code, "referred_email": email},
                 {"$set": {"status": "active", "plan_type": plan}, "$setOnInsert": {
@@ -1686,11 +1726,25 @@ async def _finalize_payment(tx: dict, new_status: str):
                 "referred_email": email,
                 "plan": plan,
                 "amount": commission_amount,
-                "rate": commission_rate,
+                "rate": AFFILIATE_RATE,
                 "package_id": pkg_id,
                 "transaction_id": tx["id"],
                 "earned_at": now_iso(),
             })
+        # Update user plan
+        user = await db.users.find_one({"email": email}) if email else None
+        if user:
+            await db.users.update_one({"id": user["id"]}, {"$set": {"plan": plan}})
+
+    # AI Edit add-on credits — increment the user's `ai_edit_credits` counter
+    elif pkg_id in AI_EDIT_ADDONS:
+        addon = AI_EDIT_ADDONS[pkg_id]
+        user = await db.users.find_one({"email": email}) if email else None
+        if user:
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$inc": {"ai_edit_credits": addon["count"]}},
+            )
 
     # Welcome email
     if email:
@@ -2098,7 +2152,388 @@ async def ceo_coupon_redemptions(user: dict = Depends(require_ceo)):
     return {"redemptions": rows}
 
 
-# ─── Content Studio: scheduled posts + AI caption generator ───
+# ─── CEO Communications (email campaigns + 1:1 DM) ───
+class CampaignIn(BaseModel):
+    audience: Literal["all", "free", "creator", "studio", "founders"]
+    subject: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1)
+
+
+@api.post("/ceo/campaigns")
+async def send_campaign(body: CampaignIn, user: dict = Depends(require_ceo)):
+    q = {}
+    if body.audience == "free":
+        q = {"$or": [{"plan": "free"}, {"plan": {"$exists": False}}]}
+    elif body.audience in ("creator", "studio"):
+        q = {"plan": body.audience}
+    elif body.audience == "founders":
+        q = {"is_founder": True}
+    targets = await db.users.find(q, {"_id": 0, "email": 1, "first_name": 1}).to_list(5000)
+    sent = 0
+    for u in targets:
+        em = u.get("email") or ""
+        if not em:
+            continue
+        try:
+            await send_email(em, body.subject, body.body.replace("{first_name}", u.get("first_name", "")))
+            sent += 1
+        except Exception as e:
+            logger.warning(f"campaign send failed for {em}: {e}")
+    record = {
+        "id": str(uuid.uuid4()),
+        "audience": body.audience,
+        "subject": body.subject,
+        "body": body.body,
+        "sent_count": sent,
+        "sent_at": now_iso(),
+        "sent_by": user["id"],
+    }
+    await db.campaigns.insert_one(record)
+    record.pop("_id", None)
+    return {"sent": sent, "campaign": record}
+
+
+@api.get("/ceo/campaigns")
+async def list_campaigns(user: dict = Depends(require_ceo)):
+    rows = await db.campaigns.find({}, {"_id": 0}).sort("sent_at", -1).limit(200).to_list(200)
+    return {"campaigns": rows}
+
+
+class DMIn(BaseModel):
+    user_email: EmailStr
+    subject: str
+    body: str
+
+
+@api.post("/ceo/dm")
+async def dm_user(body: DMIn, user: dict = Depends(require_ceo)):
+    try:
+        await send_email(body.user_email, body.subject, body.body)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Send failed: {e}")
+    await db.campaigns.insert_one({
+        "id": str(uuid.uuid4()), "audience": "dm:" + body.user_email,
+        "subject": body.subject, "body": body.body, "sent_count": 1,
+        "sent_at": now_iso(), "sent_by": user["id"],
+    })
+    return {"ok": True}
+
+
+# ─── CEO Analytics (MRR / signups / churn / plan breakdown) ───
+@api.get("/ceo/analytics")
+async def ceo_analytics(user: dict = Depends(require_ceo)):
+    # Plan breakdown
+    plans_cursor = db.users.aggregate([
+        {"$group": {"_id": {"$ifNull": ["$plan", "free"]}, "count": {"$sum": 1}}}
+    ])
+    plans = {}
+    async for r in plans_cursor:
+        plans[r["_id"]] = r["count"]
+    # MRR estimate
+    pricing = (await db.settings.find_one({"key": "pricing"}, {"_id": 0}) or {}).get("value", DEFAULT_PRICING)
+    creator_count = plans.get("creator", 0)
+    studio_count = plans.get("studio", 0)
+    mrr = round(creator_count * pricing.get("creator", {}).get("monthly", 89) + studio_count * pricing.get("studio", {}).get("monthly", 199), 2)
+    # Signups (last 30d)
+    since = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    recent = await db.users.count_documents({"created_at": {"$gte": since}})
+    total = await db.users.count_documents({})
+    # AI edits sold (one-time add-ons)
+    addon_sold = await db.payment_transactions.count_documents({
+        "package_id": {"$in": list(AI_EDIT_ADDONS.keys())},
+        "payment_status": "paid",
+    })
+    # Founder
+    founders = await _founder_count()
+    return {
+        "mrr": mrr,
+        "total_users": total,
+        "signups_30d": recent,
+        "plan_breakdown": plans,
+        "ai_edit_addons_sold": addon_sold,
+        "founder_count": founders,
+        "founder_cap": FOUNDER_CAP,
+    }
+
+
+# ─── Studio Projects queue (CEO-only) ───
+class StudioProjectStatusIn(BaseModel):
+    status: Literal["pending", "accepted", "denied", "in_progress", "delivered"]
+    note: Optional[str] = ""
+
+
+@api.get("/ceo/studio-projects")
+async def list_studio_projects(user: dict = Depends(require_ceo)):
+    """Returns all projects flagged for CEO review (any project from a Studio plan or with status != 'paid')."""
+    rows = await db.projects.find(
+        {"$or": [{"submitted_for_review": True}, {"plan_tier": "studio"}]},
+        {"_id": 0}
+    ).sort("created_at", -1).limit(500).to_list(500)
+    return {"projects": rows}
+
+
+@api.patch("/ceo/studio-projects/{pid}")
+async def update_studio_project(pid: str, body: StudioProjectStatusIn, user: dict = Depends(require_ceo)):
+    res = await db.projects.update_one(
+        {"id": pid},
+        {"$set": {
+            "review_status": body.status,
+            "review_note": body.note or "",
+            "reviewed_at": now_iso(),
+            "reviewed_by": user["id"],
+        }},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"ok": True}
+
+
+
+def _s3_client():
+    if not BOTO_AVAILABLE:
+        return None
+    try:
+        return boto3.client(
+            "s3",
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            region_name=os.environ.get("AWS_REGION", "us-east-2"),
+        )
+    except Exception as e:
+        logger.error(f"s3 client error: {e}")
+        return None
+
+
+class S3PresignIn(BaseModel):
+    filename: str = Field(min_length=1, max_length=200)
+    content_type: Optional[str] = "video/mp4"
+
+
+@api.post("/uploads/presign")
+async def presign_upload(body: S3PresignIn, user: dict = Depends(get_current_user)):
+    """Return a presigned PUT URL for direct browser → S3 upload."""
+    s3 = _s3_client()
+    bucket = os.environ.get("AWS_S3_BUCKET")
+    if not s3 or not bucket:
+        raise HTTPException(status_code=503, detail="Storage not configured")
+    # Sanitize filename
+    safe_name = "".join(c if c.isalnum() or c in "._-" else "_" for c in body.filename)[:120]
+    key = f"uploads/{user['id']}/{uuid.uuid4().hex[:12]}_{safe_name}"
+    try:
+        url = s3.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": bucket, "Key": key, "ContentType": body.content_type or "video/mp4"},
+            ExpiresIn=3600,
+        )
+    except ClientError as e:
+        logger.error(f"s3 presign error: {e}")
+        raise HTTPException(status_code=502, detail="Couldn't create upload URL")
+    public_url = f"https://{bucket}.s3.{os.environ.get('AWS_REGION','us-east-2')}.amazonaws.com/{key}"
+    return {"upload_url": url, "key": key, "public_url": public_url}
+
+
+class TranscribeIn(BaseModel):
+    public_url: str
+
+
+@api.post("/ai/transcribe")
+async def transcribe_video(body: TranscribeIn, user: dict = Depends(get_current_user)):
+    """OpenAI Whisper transcription. Downloads the file URL and forwards to Whisper."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not (OPENAI_AVAILABLE and api_key):
+        raise HTTPException(status_code=503, detail="Transcription not configured")
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            r = await client.get(body.public_url)
+            r.raise_for_status()
+            video_bytes = r.content
+        client = OpenAI(api_key=api_key)
+        # Whisper accepts file-like objects with a name
+        import io as _io
+        f = _io.BytesIO(video_bytes)
+        f.name = "clip.mp4"
+        tr = client.audio.transcriptions.create(model="whisper-1", file=f)
+        return {"transcript": tr.text}
+    except Exception as e:
+        logger.error(f"whisper error: {e}")
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
+
+
+class ShotstackRenderIn(BaseModel):
+    source_url: str
+    trim_start: float = 0.0
+    trim_end: Optional[float] = None  # seconds
+    aspect: Literal["9:16", "1:1", "16:9"] = "9:16"
+    burn_subtitles: bool = False
+    transcript: Optional[str] = ""
+
+
+_ASPECT_TO_SIZE = {
+    "9:16": ("vertical", 1080, 1920),
+    "1:1": ("square", 1080, 1080),
+    "16:9": ("hd", 1920, 1080),
+}
+
+
+@api.post("/ai/render")
+async def shotstack_render(body: ShotstackRenderIn, user: dict = Depends(get_current_user)):
+    """Submit a render to Shotstack. Returns render_id; poll /ai/render/{id} for status."""
+    api_key = os.environ.get("SHOTSTACK_API_KEY")
+    base_url = os.environ.get("SHOTSTACK_API_URL", "https://api.shotstack.io/edit/v1")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Render service not configured")
+
+    resolution, _, _ = _ASPECT_TO_SIZE[body.aspect]
+    length = (body.trim_end - body.trim_start) if body.trim_end else 30
+    if length <= 0 or length > 600:
+        length = 30
+
+    video_clip = {
+        "asset": {"type": "video", "src": body.source_url, "trim": float(body.trim_start)},
+        "start": 0,
+        "length": float(length),
+        "fit": "cover",
+    }
+    tracks = [{"clips": [video_clip]}]
+    if body.burn_subtitles and (body.transcript or "").strip():
+        # Simple single-line burn — Shotstack title clip
+        tracks.insert(0, {"clips": [{
+            "asset": {"type": "title", "text": (body.transcript or "")[:120], "style": "subtitle"},
+            "start": 0,
+            "length": float(length),
+            "position": "bottom",
+            "offset": {"y": 0.05},
+        }]})
+
+    payload = {
+        "timeline": {"background": "#000000", "tracks": tracks},
+        "output": {"format": "mp4", "resolution": resolution, "fps": 30},
+    }
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        try:
+            r = await client.post(
+                f"{base_url}/render",
+                json=payload,
+                headers={"x-api-key": api_key, "content-type": "application/json"},
+            )
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            logger.error(f"shotstack submit failed: {e}")
+            raise HTTPException(status_code=502, detail=f"Render failed: {e}")
+
+    render_id = (data.get("response") or {}).get("id")
+    if not render_id:
+        raise HTTPException(status_code=502, detail="No render id from Shotstack")
+    await db.renders.insert_one({
+        "id": render_id,
+        "owner_id": user["id"],
+        "source_url": body.source_url,
+        "aspect": body.aspect,
+        "submitted_at": now_iso(),
+    })
+    return {"render_id": render_id, "status": "queued"}
+
+
+@api.get("/ai/render/{render_id}")
+async def shotstack_status(render_id: str, user: dict = Depends(get_current_user)):
+    api_key = os.environ.get("SHOTSTACK_API_KEY")
+    base_url = os.environ.get("SHOTSTACK_API_URL", "https://api.shotstack.io/edit/v1")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Render service not configured")
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{base_url}/render/{render_id}",
+            headers={"x-api-key": api_key},
+        )
+        r.raise_for_status()
+        data = r.json()
+    resp = data.get("response") or {}
+    return {
+        "render_id": render_id,
+        "status": resp.get("status"),
+        "url": resp.get("url"),
+        "error": resp.get("error"),
+        "owner": True,
+    }
+
+
+# ─── AI Edit usage tracking + gating ───
+def _cycle_key(dt: Optional[datetime] = None) -> str:
+    d = dt or datetime.now(timezone.utc)
+    return f"{d.year}-{d.month:02d}"
+
+
+async def _usage_doc(user_id: str) -> dict:
+    cycle = _cycle_key()
+    doc = await db.usage.find_one({"user_id": user_id, "cycle": cycle}, {"_id": 0})
+    if not doc:
+        doc = {"user_id": user_id, "cycle": cycle, "edits": 0, "ai_edits": 0, "captions": 0, "calendar_posts_created": 0}
+        await db.usage.insert_one({**doc, "_id_dummy": None})
+        doc.pop("_id_dummy", None)
+    return doc
+
+
+@api.get("/usage/me")
+async def my_usage(user: dict = Depends(get_current_user)):
+    doc = await _usage_doc(user["id"])
+    plan = user.get("plan") or "free"
+    if user.get("role") == "ceo":
+        plan = "studio"
+    limits = TIER_LIMITS.get(plan, TIER_LIMITS["free"])
+    credits = int(user.get("ai_edit_credits", 0) or 0)
+    return {
+        "cycle": doc["cycle"],
+        "plan": plan,
+        "limits": limits,
+        "used": {"edits": doc.get("edits", 0), "ai_edits": doc.get("ai_edits", 0), "captions": doc.get("captions", 0)},
+        "ai_edit_credits": credits,
+    }
+
+
+class AIEditConsumeIn(BaseModel):
+    pass
+
+
+@api.post("/usage/ai-edit/consume")
+async def consume_ai_edit(user: dict = Depends(get_current_user)):
+    """Atomically check + decrement an AI-edit allowance. Returns 402 with upsell payload if limit hit."""
+    plan = user.get("plan") or "free"
+    if user.get("role") == "ceo":
+        plan = "studio"
+    limits = TIER_LIMITS.get(plan, TIER_LIMITS["free"])
+    cycle = _cycle_key()
+    doc = await _usage_doc(user["id"])
+    used = int(doc.get("ai_edits", 0) or 0)
+    credits = int(user.get("ai_edit_credits", 0) or 0)
+    limit = limits["ai_edits"]
+    # Unlimited (Studio)
+    if limit < 0:
+        await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"ai_edits": 1}}, upsert=True)
+        return {"ok": True, "remaining": -1, "source": "unlimited"}
+    # Within free monthly allowance
+    if used < limit:
+        await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"ai_edits": 1}}, upsert=True)
+        return {"ok": True, "remaining": limit - used - 1, "source": "monthly_quota"}
+    # Use a paid credit
+    if credits > 0:
+        await db.users.update_one({"id": user["id"]}, {"$inc": {"ai_edit_credits": -1}})
+        await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"ai_edits": 1}}, upsert=True)
+        return {"ok": True, "remaining": credits - 1, "source": "addon_credit"}
+    # Limit hit — return upsell payload (frontend opens modal)
+    raise HTTPException(
+        status_code=402,
+        detail={
+            "code": "ai_edits_exhausted",
+            "message": f"You've used all {limit} AI edits this month.",
+            "plan": plan,
+            "addons": AI_EDIT_ADDONS,
+        },
+    )
+
+
+
 @api.get("/content/posts")
 async def list_content_posts(user: dict = Depends(get_current_user)):
     posts = await db.content_posts.find({"owner_id": user["id"]}, {"_id": 0}).sort("scheduled_for", 1).to_list(2000)
@@ -2107,6 +2542,21 @@ async def list_content_posts(user: dict = Depends(get_current_user)):
 
 @api.post("/content/posts")
 async def create_content_post(body: ContentPostIn, user: dict = Depends(get_current_user)):
+    # Enforce Free tier 10-post calendar cap
+    plan = user.get("plan") or "free"
+    if user.get("role") != "ceo":
+        limit = TIER_LIMITS.get(plan, TIER_LIMITS["free"]).get("calendar_posts", 10)
+        if limit > 0:
+            current = await db.content_posts.count_documents({"owner_id": user["id"]})
+            if current >= limit:
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "code": "calendar_limit",
+                        "message": f"You've hit the {limit}-post calendar cap on Free. Upgrade to Creator for unlimited scheduled posts.",
+                        "plan": plan,
+                    },
+                )
     post = {
         "id": str(uuid.uuid4()),
         "owner_id": user["id"],
@@ -2150,6 +2600,23 @@ _PLATFORM_RULES = {
 @api.post("/content/caption/generate")
 async def generate_caption(body: CaptionGenIn, user: dict = Depends(get_current_user)):
     """AI-powered: returns 3 distinct caption options optimised for the chosen platform."""
+    # Enforce caption monthly limit
+    plan = user.get("plan") or "free"
+    if user.get("role") != "ceo":
+        limits = TIER_LIMITS.get(plan, TIER_LIMITS["free"])
+        cap = limits.get("captions", 3)
+        if cap >= 0:
+            doc = await _usage_doc(user["id"])
+            used = int(doc.get("captions", 0) or 0)
+            if used >= cap:
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "code": "captions_exhausted",
+                        "message": f"You've used all {cap} captions this month. Upgrade to Creator for 30/mo or Studio for unlimited.",
+                        "plan": plan,
+                    },
+                )
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
     except Exception:
@@ -2191,6 +2658,10 @@ async def generate_caption(body: CaptionGenIn, user: dict = Depends(get_current_
     captions = [p for p in parts if p][:3]
     while len(captions) < 3:
         captions.append(text.strip() or "Couldn't generate — please retry.")
+    # Bump captions used
+    if user.get("role") != "ceo":
+        cycle = _cycle_key()
+        await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"captions": 1}}, upsert=True)
     return {"captions": captions, "platform": body.platform}
 
 
@@ -2258,19 +2729,21 @@ async def on_startup():
     if not pricing_doc:
         await db.settings.insert_one({"key": "pricing", "value": DEFAULT_PRICING, "updated_at": now_iso()})
     else:
-        # Migration: if any cached value matches the legacy pre-v8 numbers, sync to new defaults
         cur = pricing_doc.get("value") or {}
+        # Migration: if cached has any pre-v9 numbers, sync
+        creator_m = cur.get("creator", {}).get("monthly")
+        studio_m = cur.get("studio", {}).get("monthly")
         legacy = (
-            cur.get("creator", {}).get("monthly") == 49.0
-            or cur.get("creator", {}).get("yearly") == 468.0
-            or cur.get("studio", {}).get("yearly") == 1908.0
+            creator_m in (49.0, 79.0)  # v7 or v8
+            or studio_m in (199.0,) and cur.get("studio", {}).get("yearly") in (1908.0, 2028.0)
+            or "free" not in cur
         )
         if legacy:
             await db.settings.update_one(
                 {"key": "pricing"},
                 {"$set": {"value": DEFAULT_PRICING, "updated_at": now_iso()}},
             )
-            logger.info("Migrated cached pricing to v8 defaults (Creator 79 / Studio 199 regular)")
+            logger.info("Migrated cached pricing to v9 defaults (Creator $89/$75ann · Studio $199/$175ann · Free $0)")
     if not await db.settings.find_one({"key": "platform"}):
         await db.settings.insert_one({"key": "platform", "value": DEFAULT_SETTINGS, "updated_at": now_iso()})
     if not await db.settings.find_one({"key": "email_templates"}):

@@ -7,9 +7,10 @@ import { useState, useRef, useEffect } from "react";
 const TABS_USER = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
-  { to: "/editor", label: "AI Editor" },
-  { to: "/content-studio", label: "Content Studio" },
-  { to: "/invoices", label: "Invoices" },
+  { to: "/editor", label: "Editor" },
+  { to: "/content-studio", label: "Captions & Calendar" },
+  { to: "/library", label: "Library" },
+  { to: "/invoices", label: "Billing" },
   { to: "/community", label: "Community" },
   { to: "/sparks", label: "Sparks" },
 ];
@@ -17,9 +18,10 @@ const TABS_CEO = [
   { to: "/dashboard", label: "Dashboard" },
   { to: "/projects", label: "Projects" },
   { to: "/clients", label: "Clients" },
-  { to: "/editor", label: "AI Editor" },
-  { to: "/content-studio", label: "Content Studio" },
-  { to: "/invoices", label: "Invoices" },
+  { to: "/editor", label: "Editor" },
+  { to: "/content-studio", label: "Captions & Calendar" },
+  { to: "/library", label: "Library" },
+  { to: "/invoices", label: "Billing" },
   { to: "/community", label: "Community" },
   { to: "/sparks", label: "Sparks" },
 ];

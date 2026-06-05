@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
+import AIEditLimitModal from "../components/AIEditLimitModal";
 import { Scissors, Zap, Square, Palette, Sparkles, Type, ArrowLeftRight, Music, Bot, Plus, Trash2, Upload, Play, Pause, CalendarPlus, Check } from "lucide-react";
 
 const CLIP_COLORS = {
@@ -37,6 +38,7 @@ export default function AIEditor() {
   const [filename, setFilename] = useState("");
   const [toast, setToast] = useState(null);
   const [exportReady, setExportReady] = useState(null); // { url, suggestedPlatform } | null
+  const [aiLimit, setAiLimit] = useState({ open: false, message: "" });
   const fileInput = useRef(null);
 
   // Load existing video projects on mount
@@ -145,6 +147,17 @@ export default function AIEditor() {
 
   const autoEdit = async () => {
     if (!videoProject) return;
+    // Consume an AI-edit credit first — on 402 show the upsell modal
+    try {
+      await api.post("/usage/ai-edit/consume");
+    } catch (e) {
+      if (e.response?.status === 402) {
+        const d = e.response.data?.detail || {};
+        setAiLimit({ open: true, message: d.message || "" });
+        return;
+      }
+      throw e;
+    }
     const { data } = await api.post(`/ai/projects/${videoProject.id}/auto-edit`, { target: "tiktok", duration: 60 });
     setTimeline(data.timeline);
     showToast(`✦ AI assembled a ${data.total_duration}s ${data.target} cut`);
@@ -471,6 +484,8 @@ export default function AIEditor() {
           </div>
         </div>
       )}
+
+      <AIEditLimitModal open={aiLimit.open} message={aiLimit.message} onClose={() => setAiLimit({ open: false, message: "" })} />
     </div>
   );
 }

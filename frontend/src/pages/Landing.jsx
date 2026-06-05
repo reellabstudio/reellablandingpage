@@ -1,314 +1,402 @@
-import { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import api, { formatErr } from "../lib/api";
-import HelpBotPublic from "../components/HelpBotPublic";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { Scissors, Sparkles, Calendar, Send, Star, Check, ChevronDown } from "lucide-react";
+import api from "../lib/api";
 
-const PAINS = [
-  "Spending 6 hours editing a 3-minute reel",
-  "Posting less because editing is a full-time job",
-  "Losing your best moments buried in footage",
-  "Re-editing the same clip for 6 different platforms",
-  "AI tools that strip out everything that makes you, you",
-  "No time to plan, schedule, or track what's working",
+const FEATURES_TABLE = [
+  ["Video edits / mo", "3", "15", "Unlimited"],
+  ["AI Auto-Edits / mo", "0", "5 (+$12/ea)", "Unlimited"],
+  ["AI captions / mo", "3", "30", "Unlimited"],
+  ["Calendar posts", "10", "Unlimited", "Unlimited"],
+  ["Export package", "✓", "✓", "✓"],
+  ["Direct publishing", "—", "—", "IG / TikTok / YT"],
+  ["Brand voice training", "—", "—", "✓"],
+  ["Client delivery + invoicing", "—", "—", "✓"],
 ];
 
-const FEATURES = [
-  { num: "01", icon: "🧠", title: "AI Moment Intelligence", body: "Detects emotional spikes, hook moments, crowd reactions, beat drops, punchlines, and storytelling pivots. Outputs ranked clips by category: Viral, Emotional, Controversial, Inspirational, Best Hooks.", tag: "✦ Flagship feature" },
-  { num: "02", icon: "🎨", title: "Style DNA Learning", body: "The platform learns your pacing, transitions, captions, zoom style, color grading, and music preferences over time. Tell it: \"Edit this like a luxury fashion campaign.\" It delivers.", tag: "✦ The moat" },
-  { num: "03", icon: "🎬", title: "AI Director Mode", body: "Type a creative direction: \"Make this feel like an A24 trailer\" or \"Edit this like cinematic NYC.\" AI changes pacing, sound, transitions, grading, captions, and framing to match.", tag: "✦ Industry first" },
-  { num: "04", icon: "📱", title: "One Upload → Every Platform", body: "Automatically generates optimized versions for TikTok, Reels, YouTube Shorts, X, LinkedIn, Spotify Clips, Fashion Ads, and Podcast Shorts — each formatted and captioned for that platform's algorithm." },
-  { num: "05", icon: "✏️", title: "Transcript + Timeline Editor", body: "Edit by transcript, drag clips traditionally, or use AI commands. \"Shorten pauses.\" \"Make this more intense.\" \"Add dramatic captions.\" Descript's power with CapCut's simplicity in one interface." },
-  { num: "06", icon: "📊", title: "Publishing & Growth Engine", body: "AI recommends best posting times, titles, hooks, thumbnails, hashtags, and caption styles based on your niche, previous performance, and platform trends. This is where the platform gets sticky.", tag: "✦ Studio tier" },
+const TESTIMONIALS = [
+  { name: "Jordan M.", role: "UGC creator · 42K", quote: "Cut my post turnaround from 90 min to 6. The auto-edit alone is worth it.", initials: "JM" },
+  { name: "Taylor S.", role: "Fitness · Studio plan", quote: "I run an entire content team out of ReelLab now. Brand voice + client delivery in one place.", initials: "TS" },
 ];
 
-const PLATFORMS = [
-  { icon: "🎵", name: "TikTok", sub: "Vertical · fast cuts" },
-  { icon: "📸", name: "Instagram Reels", sub: "Caption-heavy aesthetic" },
-  { icon: "▶️", name: "YouTube Shorts", sub: "Retention optimized" },
-  { icon: "𝕏", name: "X / Twitter", sub: "Punchline snippets" },
-  { icon: "💼", name: "LinkedIn", sub: "Clean & professional" },
-  { icon: "🎙", name: "Podcast Shorts", sub: "Speaker-focused clips" },
-  { icon: "👗", name: "Fashion / Brand Ads", sub: "Cinematic edits" },
-  { icon: "🎵", name: "Spotify Clips", sub: "Artist promos" },
+const FAQS = [
+  { q: "Do I need editing experience?", a: "Nope. ReelLab is built for creators who hate editing. Upload your raw clip — AI Auto-Edit handles trim, framing, captions, and platform formatting. You just pick what gets posted." },
+  { q: "Is the Free plan really free?", a: "Yes — no card, no trial countdown. 3 edits, 3 captions, and 10 calendar posts per month, forever. Upgrade only when you need more." },
+  { q: "What's the $12 add-on for?", a: "If you're on Creator and burn through your 5 monthly AI Auto-Edits, you can buy more à la carte: $12 for 1, $30 for 3, $50 for 5. No subscription change required." },
+  { q: "Creator vs Studio — which one's for me?", a: "Creator is for solo creators who want unlimited tools but post mainly themselves. Studio adds direct publishing to IG/TikTok/YT, brand voice training, client invoicing, and a private review queue with our team. If you're an agency or post for clients, you want Studio." },
+  { q: "What's the Founder's Circle?", a: "First 100 paying members lock $49/mo Creator pricing for life with a $50 one-time entry. After 100, the offer closes and pricing goes to $89/mo." },
 ];
 
-const AUDIENCES = [
-  { icon: "🎙️", title: "Podcasters", body: "Turn hours of audio-video into a week of clips. ReelLab finds the moments your audience will share before you even finish listening back." },
-  { icon: "🎬", title: "YouTubers", body: "Your long-form content is a clip machine. One upload generates Shorts, Reels, TikToks, and X clips — already optimized for each algorithm." },
-  { icon: "✨", title: "Creators & Personal Brands", body: "Your voice, your style, your creative direction. ReelLab learns your DNA and applies it — you stay in control of every final cut." },
-  { icon: "🏢", title: "Agencies & Studios", body: "Team workspaces, client portals, approval workflows, brand libraries, and bulk processing. Run your entire client roster from one dashboard." },
-];
+export default function Landing() {
+  const [yearly, setYearly] = useState(true);
+  const [openFaq, setOpenFaq] = useState(null);
+  const [founder, setFounder] = useState({ available: true, spots_left: 67, cap: 100 });
+  const [signup, setSignup] = useState({ name: "", email: "", password: "" });
+  const [signupErr, setSignupErr] = useState("");
+  const [signupBusy, setSignupBusy] = useState(false);
+  const [signupOk, setSignupOk] = useState(false);
 
-function WaitlistForm({ tag, btnText = "Join Waitlist" }) {
-  const [email, setEmail] = useState("");
-  const [done, setDone] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", "dark");
+    api.get("/pricing").then(({ data }) => { if (data.founder) setFounder(data.founder); }).catch(() => {});
+  }, []);
 
-  const submit = async (e) => {
+  const submitSignup = async (e) => {
     e.preventDefault();
-    setErr("");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setErr("Please enter a valid email.");
+    setSignupErr("");
+    if (!signup.email || !signup.password) {
+      setSignupErr("Email and password are required.");
       return;
     }
-    setBusy(true);
+    setSignupBusy(true);
     try {
-      await api.post("/waitlist", { email, source: tag });
-      setDone(true);
-    } catch (e2) {
-      setErr(formatErr(e2.response?.data?.detail) || "Something went wrong.");
+      const [first, ...rest] = signup.name.trim().split(/\s+/);
+      const last = rest.join(" ") || "User";
+      const username = (signup.email.split("@")[0] || "user").replace(/[^a-z0-9_]/gi, "").slice(0, 20) || `u${Date.now() % 100000}`;
+      await api.post("/auth/register", {
+        email: signup.email,
+        password: signup.password,
+        first_name: first || "Creator",
+        last_name: last,
+        username,
+      });
+      setSignupOk(true);
+      setTimeout(() => { window.location.href = "/onboarding"; }, 800);
+    } catch (err) {
+      setSignupErr(err.response?.data?.detail || "Couldn't create account.");
     }
-    setBusy(false);
+    setSignupBusy(false);
   };
 
-  if (done) {
-    return (
-      <div className="waitlist-success" data-testid={`waitlist-success-${tag}`}>
-        <div className="check">✦</div>
-        <strong>You're on the list.</strong>
-        <p style={{ fontSize: 13, color: "var(--text-sec)", marginTop: 4 }}>We'll be in touch. Something real is coming.</p>
-      </div>
-    );
-  }
-  return (
-    <>
-      <form className="waitlist-form" onSubmit={submit} data-testid={`waitlist-form-${tag}`}>
-        <input type="email" placeholder="Enter your email address" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required data-testid={`waitlist-email-${tag}`} />
-        <button type="submit" className="waitlist-btn" disabled={busy} data-testid={`waitlist-submit-${tag}`}>
-          {busy ? "Joining…" : btnText}
-        </button>
-      </form>
-      <p className="waitlist-note">No spam. Just updates when we're ready for you.</p>
-      {err && <p style={{ fontSize: 12, color: "#E07070", marginTop: 8 }} data-testid={`waitlist-error-${tag}`}>{err}</p>}
-    </>
-  );
-}
-
-function FounderForm() {
-  const navigate = useNavigate();
-  const [form, setForm] = useState({ name: "", email: "", creator_type: "", handle: "" });
-  const submit = () => {
-    // Push selection into checkout via query params + localStorage
-    sessionStorage.setItem("rl_founder_prefill", JSON.stringify(form));
-    const refData = localStorage.getItem("rl_ref");
-    const ref = refData ? JSON.parse(refData).code : "";
-    navigate(`/founder-checkout${ref ? `?ref=${ref}` : ""}`);
+  const planPrice = (plan) => {
+    if (plan === "free") return { price: 0, period: "/forever", note: "No card needed" };
+    if (plan === "creator") return yearly
+      ? { price: 75, period: "/mo", note: "Billed annually · $900/yr" }
+      : { price: 89, period: "/mo", note: "Billed monthly · cancel anytime" };
+    if (plan === "studio") return yearly
+      ? { price: 175, period: "/mo", note: "Billed annually · $2,100/yr" }
+      : { price: 199, period: "/mo", note: "Billed monthly · cancel anytime" };
   };
 
   return (
-    <div className="founder-form-card" data-testid="founder-form">
-      <h3>Claim your spot</h3>
-      <p className="sub">$1 today · First month of Creator free · Lifetime Founder status.</p>
-      <div style={{ marginBottom: 12 }}>
-        <label className="label">First Name</label>
-        <input className="input" placeholder="Your name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="founder-name" />
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <label className="label">Email Address</label>
-        <input className="input" type="email" placeholder="you@email.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="founder-email" />
-      </div>
-      <div style={{ marginBottom: 12 }}>
-        <label className="label">Creator Type</label>
-        <select className="input" value={form.creator_type} onChange={(e) => setForm({ ...form, creator_type: e.target.value })} data-testid="founder-type">
-          <option value="">Select your category…</option>
-          <option>Podcaster</option><option>YouTuber</option><option>TikTok / Reels Creator</option>
-          <option>Musician / Artist</option><option>Brand / Agency</option><option>Freelance Editor</option><option>Other</option>
-        </select>
-      </div>
-      <div style={{ marginBottom: 16 }}>
-        <label className="label">@ Handle (optional)</label>
-        <input className="input" placeholder="@yourusername" value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value })} data-testid="founder-handle" />
-      </div>
-      <button onClick={submit} style={{ width: "100%", padding: 12, borderRadius: 8, border: "none", background: "linear-gradient(135deg, var(--purple), var(--purple-mid))", color: "#fff", fontSize: 14, fontWeight: 500, cursor: "pointer" }} data-testid="founder-submit">
-        Continue to checkout · $1 →
-      </button>
-      <p style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 10, textAlign: "center" }}>Secured by Stripe · 256-bit SSL</p>
+    <div data-testid="landing-v9" style={{ background: "var(--bg)", color: "var(--text)" }}>
+      {/* NAV */}
+      <Nav />
+
+      {/* HERO */}
+      <section style={{ position: "relative", padding: "140px 24px 80px", textAlign: "center", overflow: "hidden" }}>
+        <div style={{
+          position: "absolute", left: "50%", top: "20%", transform: "translate(-50%, -50%)",
+          width: 900, height: 900, borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(124,92,191,0.35) 0%, rgba(124,92,191,0) 60%)",
+          filter: "blur(60px)", pointerEvents: "none", zIndex: 0,
+        }} />
+        <div style={{ position: "relative", zIndex: 1, maxWidth: 1000, margin: "0 auto" }}>
+          <span style={{
+            display: "inline-block", padding: "6px 14px", borderRadius: 100,
+            background: "var(--purple-glow)", border: "1px solid var(--purple-border)",
+            color: "var(--purple-light)", fontSize: 12, letterSpacing: ".05em", marginBottom: 28,
+            fontFamily: "DM Mono, monospace",
+          }} data-testid="hero-eyebrow">The creator workflow OS</span>
+          <h1 className="display-xl" style={{ margin: "0 0 22px", color: "var(--text)" }} data-testid="hero-h1">
+            Film it. <span style={{ color: "var(--purple-mid)" }}>ReelLab it.</span> Post it.
+          </h1>
+          <p style={{ fontSize: 18, color: "var(--text-sec)", maxWidth: 640, margin: "0 auto 36px", lineHeight: 1.6 }}>
+            Stop juggling five apps to get one post live. ReelLab handles your editing, captions, content calendar, and export — so all you have to do is upload.
+          </p>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 18 }}>
+            <Link to="/register" className="btn-primary" data-testid="hero-cta-primary" style={{ padding: "16px 30px", fontSize: 15 }}>Start for free →</Link>
+            <a href="#how" className="btn-secondary" data-testid="hero-cta-secondary" style={{ padding: "16px 30px", fontSize: 15 }}>See how it works</a>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "DM Mono, monospace" }}>Free plan available · No credit card required · Upgrade anytime</div>
+        </div>
+      </section>
+
+      {/* STATS BAR */}
+      <section style={{ borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", padding: "40px 24px" }}>
+          {[
+            ["8 min", "avg. clip to upload-ready"],
+            ["4 → 1", "tools replaced"],
+            ["3 steps", "from filming to posted"],
+          ].map(([num, label]) => (
+            <div key={num} style={{ textAlign: "center" }}>
+              <div className="display-lg" style={{ color: "var(--purple-mid)", margin: 0 }}>{num}</div>
+              <div style={{ color: "var(--text-sec)", fontSize: 13, marginTop: 6 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* WORKFLOW */}
+      <section id="how" style={{ padding: "100px 24px", maxWidth: 1200, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 60 }}>
+          <h2 className="display-lg" style={{ color: "var(--text)", margin: 0 }}>The 4-step workflow</h2>
+          <p style={{ color: "var(--text-sec)", fontSize: 15, marginTop: 10 }}>Designed to take you from raw footage to scheduled post in one sitting.</p>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 18 }}>
+          {[
+            { num: 1, Icon: Scissors, title: "Edit", desc: "AI Auto-Edit trims, frames, and adds burned subtitles in seconds.", color: "var(--purple-mid)" },
+            { num: 2, Icon: Sparkles, title: "Caption", desc: "Three platform-tuned caption options per video, with hashtags and CTAs.", color: "var(--teal)" },
+            { num: 3, Icon: Calendar, title: "Organize", desc: "Schedule across IG, TikTok, YT, X, Facebook from one calendar.", color: "#5BA4E8" },
+            { num: 4, Icon: Send, title: "Upload", desc: "Studio: direct publish. Everyone else: one-tap export package.", color: "var(--amber)" },
+          ].map(({ num, Icon, title, desc, color }) => (
+            <div className="card" key={num} style={{ padding: 24 }}>
+              <div style={{ fontFamily: "DM Mono, monospace", fontSize: 11, color: "var(--text-dim)", letterSpacing: ".15em" }}>STEP {String(num).padStart(2, "0")}</div>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: `${color}22`, color, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 12, marginBottom: 14 }}><Icon size={20} /></div>
+              <div className="display-md" style={{ marginBottom: 6, color: "var(--text)" }}>{title}</div>
+              <p style={{ color: "var(--text-sec)", fontSize: 13.5, lineHeight: 1.6, margin: 0 }}>{desc}</p>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 28, textAlign: "center", padding: "14px 18px", background: "var(--surface2)", borderRadius: 100, display: "inline-flex", alignSelf: "center", color: "var(--text-sec)", fontSize: 13, marginLeft: "50%", transform: "translateX(-50%)" }}>
+          Average time from raw clip to upload-ready: <strong style={{ color: "var(--purple-mid)", marginLeft: 6 }}>under 8 minutes.</strong>
+        </div>
+      </section>
+
+      {/* PRICING */}
+      <section id="pricing" style={{ padding: "100px 24px", maxWidth: 1200, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <h2 className="display-lg" style={{ color: "var(--text)", margin: 0 }}>Simple, fair pricing</h2>
+          <p style={{ color: "var(--text-sec)", fontSize: 15, marginTop: 10 }}>Start free. Upgrade when you need more.</p>
+        </div>
+        {/* Toggle */}
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 36 }}>
+          <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 100, padding: 4, display: "flex", gap: 4 }}>
+            {[{ k: false, l: "Monthly" }, { k: true, l: "Annual · save 16%" }].map(({ k, l }) => (
+              <button key={l} onClick={() => setYearly(k)} data-testid={k ? "pricing-toggle-annual" : "pricing-toggle-monthly"}
+                style={{
+                  padding: "8px 18px", borderRadius: 100, border: "none", cursor: "pointer",
+                  background: yearly === k ? "var(--purple)" : "transparent",
+                  color: yearly === k ? "#fff" : "var(--text-sec)", fontSize: 13, fontWeight: 500,
+                }}>{l}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16, maxWidth: 1100, margin: "0 auto" }}>
+          <PlanCard plan="free" name="Free" tag="For testing the waters." {...planPrice("free")}
+            features={["3 video edits/mo", "3 AI captions/mo", "10-post calendar", "Export package", "Email support"]} />
+          <PlanCard plan="creator" name="Creator" tag="For serious creators ready to scale." featured {...planPrice("creator")}
+            features={["15 video edits/mo", "5 AI Auto-Edits/mo", "30 AI captions/mo", "Unlimited calendar + library", "All editing tools", "Priority email support"]}
+            upsell="Extra AI edits: $12/edit · $30/3 · $50/5" />
+          <PlanCard plan="studio" name="Studio" tag="For agencies, labels, teams." {...planPrice("studio")}
+            features={["Unlimited everything", "Unlimited AI Auto-Edits", "Direct push to IG / TikTok / YT", "Brand voice training", "Client delivery + invoicing", "CEO project review queue"]} />
+        </div>
+
+        {/* Feature comparison table */}
+        <div className="card" style={{ marginTop: 60, padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "20px 28px", borderBottom: "1px solid var(--border)" }}>
+            <div className="display-md" style={{ color: "var(--text)", margin: 0 }}>Full feature comparison</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr", padding: "14px 28px", background: "var(--surface2)", borderBottom: "1px solid var(--border)", fontFamily: "DM Mono, monospace", fontSize: 11, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--text-dim)" }}>
+            <div></div><div>Free</div><div style={{ color: "var(--purple-mid)" }}>Creator</div><div style={{ color: "var(--purple-light)" }}>Studio</div>
+          </div>
+          {FEATURES_TABLE.map((row) => (
+            <div key={row[0]} style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1fr 1fr", padding: "12px 28px", borderBottom: "1px solid var(--border)", fontSize: 13.5 }}>
+              <div style={{ color: "var(--text)" }}>{row[0]}</div>
+              <div style={{ color: "var(--text-sec)" }}>{row[1]}</div>
+              <div style={{ color: "var(--text-sec)" }}>{row[2]}</div>
+              <div style={{ color: "var(--text-sec)" }}>{row[3]}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* FOUNDER'S CIRCLE */}
+      {founder.available && (
+        <section id="founders" style={{ padding: "60px 24px", maxWidth: 1200, margin: "0 auto" }}>
+          <div className="card" style={{ borderColor: "var(--amber)", padding: 36, display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 32, alignItems: "center" }} data-testid="founders-card">
+            <div>
+              <div style={{ display: "inline-block", padding: "5px 12px", borderRadius: 100, background: "var(--amber-light)", color: "var(--amber)", fontSize: 11, fontFamily: "DM Mono, monospace", letterSpacing: ".1em", marginBottom: 18 }}>✦ FOUNDER'S CIRCLE</div>
+              <h3 className="display-md" style={{ color: "var(--text)", marginTop: 0, marginBottom: 12 }}>Lock in your spot before they're gone.</h3>
+              <p style={{ color: "var(--text-sec)", fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>
+                $50 one-time, $49/mo Creator <strong style={{ color: "var(--text)" }}>locked for life</strong>, Silver badge in the community, voter panels on new features, and first-dibs on every new tool we ship.
+              </p>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div className="display-lg" style={{ color: "var(--amber)", margin: 0 }} data-testid="founders-spots">{founder.spots_left}</div>
+              <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "DM Mono, monospace", marginBottom: 18 }}>spots remaining of {founder.cap}</div>
+              <Link to="/founder-checkout" className="btn-primary" data-testid="founders-cta" style={{ background: "var(--amber)", padding: "14px 26px" }}>Claim my spot →</Link>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* TESTIMONIALS */}
+      <section style={{ padding: "100px 24px", maxWidth: 1100, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 50 }}>
+          <h2 className="display-lg" style={{ color: "var(--text)", margin: 0 }}>Creators who switched</h2>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18 }}>
+          {TESTIMONIALS.map((t) => (
+            <div key={t.name} className="card" style={{ padding: 28 }}>
+              <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>{[1,2,3,4,5].map((s) => <Star key={s} size={14} fill="var(--amber)" color="var(--amber)" />)}</div>
+              <p style={{ color: "var(--text)", fontSize: 16, lineHeight: 1.6, margin: "0 0 22px" }}>"{t.quote}"</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 38, height: 38, borderRadius: "50%", background: "var(--purple)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>{t.initials}</div>
+                <div>
+                  <div style={{ fontWeight: 500, color: "var(--text)", fontSize: 14 }}>{t.name}</div>
+                  <div style={{ color: "var(--text-dim)", fontSize: 12 }}>{t.role}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* SIGNUP */}
+      <section style={{ padding: "100px 24px", background: "var(--surface)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 60, alignItems: "center" }}>
+          <div>
+            <h2 className="display-lg" style={{ color: "var(--text)", margin: "0 0 18px" }}>Start free in 30 seconds.</h2>
+            <p style={{ color: "var(--text-sec)", fontSize: 15, lineHeight: 1.6, marginBottom: 28 }}>
+              No credit card. No trial countdown. Just sign up and start editing.
+            </p>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {["3 video edits per month", "3 AI captions per month", "10-post calendar", "Export to any platform"].map((p) => (
+                <li key={p} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", color: "var(--text-sec)", fontSize: 14 }}>
+                  <Check size={16} style={{ color: "var(--teal)" }} /> {p}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <form onSubmit={submitSignup} className="card" style={{ padding: 28 }} data-testid="landing-signup-form">
+            {signupOk ? (
+              <div style={{ textAlign: "center", padding: 30 }}><div style={{ color: "var(--teal)", fontSize: 16, marginBottom: 8 }}>✓ Welcome aboard.</div><div style={{ color: "var(--text-sec)", fontSize: 13 }}>Redirecting to onboarding…</div></div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label className="label">Name (optional)</label>
+                  <input className="input" value={signup.name} onChange={(e) => setSignup({ ...signup, name: e.target.value })} placeholder="Your full name" data-testid="signup-name" />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label className="label">Email *</label>
+                  <input className="input" type="email" value={signup.email} onChange={(e) => setSignup({ ...signup, email: e.target.value })} placeholder="you@email.com" required data-testid="signup-email" />
+                </div>
+                <div style={{ marginBottom: 18 }}>
+                  <label className="label">Password *</label>
+                  <input className="input" type="password" value={signup.password} onChange={(e) => setSignup({ ...signup, password: e.target.value })} placeholder="At least 6 characters" required minLength={6} data-testid="signup-password" />
+                </div>
+                {signupErr && <div style={{ color: "var(--coral)", fontSize: 12, marginBottom: 12 }}>{signupErr}</div>}
+                <button type="submit" className="btn-primary" disabled={signupBusy} style={{ width: "100%", padding: 14 }} data-testid="signup-submit">
+                  {signupBusy ? "Creating account…" : "Create my free account →"}
+                </button>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 14, textAlign: "center", lineHeight: 1.5 }}>
+                  By signing up you agree to our <Link to="/legal" style={{ color: "var(--text-sec)", textDecoration: "underline" }}>Terms</Link>. Already have an account? <Link to="/login" style={{ color: "var(--purple-mid)" }}>Sign in</Link>.
+                </div>
+              </>
+            )}
+          </form>
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section style={{ padding: "100px 24px", maxWidth: 800, margin: "0 auto" }}>
+        <div style={{ textAlign: "center", marginBottom: 50 }}><h2 className="display-lg" style={{ color: "var(--text)", margin: 0 }}>Questions, answered.</h2></div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {FAQS.map((f, i) => (
+            <div key={i} className="card" style={{ padding: 0, overflow: "hidden" }} data-testid={`faq-${i}`}>
+              <button onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                style={{ width: "100%", padding: "18px 22px", background: "transparent", border: "none", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", color: "var(--text)", fontSize: 15, fontWeight: 500, cursor: "pointer" }}>
+                {f.q}
+                <ChevronDown size={18} style={{ color: "var(--text-dim)", transform: openFaq === i ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+              </button>
+              {openFaq === i && (
+                <div style={{ padding: "0 22px 22px", color: "var(--text-sec)", fontSize: 14, lineHeight: 1.65 }}>{f.a}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* FOOTER */}
+      <footer style={{ borderTop: "1px solid var(--border)", padding: "60px 24px 40px", color: "var(--text-dim)", fontSize: 13 }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "1.5fr repeat(3, 1fr)", gap: 40 }}>
+          <div>
+            <Link to="/" className="rl-logo"><div className="rl-logo-mark">✦</div><span className="rl-logo-text" style={{ fontFamily: "Sora, sans-serif", fontWeight: 600 }}>ReelLab</span></Link>
+            <p style={{ marginTop: 14, color: "var(--text-sec)", maxWidth: 320, lineHeight: 1.5 }}>The creator workflow OS — edit, caption, organize, upload.</p>
+          </div>
+          <FooterCol title="Product" links={[["How it works", "#how"], ["Pricing", "#pricing"], ["Founder Circle", "#founders"]]} />
+          <FooterCol title="Company" links={[["Login", "/login"], ["Sign up", "/register"], ["Contact", "mailto:hello@reellabstudio.com"]]} />
+          <FooterCol title="Legal" links={[["Terms", "/legal"], ["Privacy", "/legal"], ["Refunds", "mailto:hello@reellabstudio.com"]]} />
+        </div>
+        <div style={{ maxWidth: 1200, margin: "40px auto 0", paddingTop: 20, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", color: "var(--text-dim)", fontSize: 12 }}>
+          <div>© {new Date().getFullYear()} ReelLab Studio · reellabstudio.com</div>
+          <div>Made for creators.</div>
+        </div>
+      </footer>
     </div>
   );
 }
 
-export default function Landing() {
-  const navigate = useNavigate();
-  const founderRef = useRef(null);
-  const featuresRef = useRef(null);
-  const waitlistRef = useRef(null);
-
+function Nav() {
+  const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", "dark");
+    const onScroll = () => setScrolled(window.scrollY > 30);
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
-
-  const scrollTo = (ref) => ref?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-
   return (
-    <div className="landing-page" data-testid="landing-page">
-      <nav className="landing-nav">
-        <Link to="/" className="rl-logo" data-testid="nav-logo">
-          <div className="rl-logo-mark">✦</div>
-          <span className="rl-logo-text">Reel<span>Lab</span></span>
-        </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <button onClick={() => scrollTo(featuresRef)} style={{ background: "none", border: "none", color: "var(--text-sec)", fontSize: 13, cursor: "pointer" }} data-testid="nav-features">Features</button>
-          <Link to="/pricing" style={{ color: "var(--text-sec)", fontSize: 13 }} data-testid="nav-pricing">Pricing</Link>
-          <button onClick={() => scrollTo(founderRef)} style={{ background: "none", border: "none", color: "var(--text-sec)", fontSize: 13, cursor: "pointer" }} data-testid="nav-founder">Founder Circle</button>
-          <Link to="/login" style={{ color: "var(--text-sec)", fontSize: 13 }} data-testid="nav-signin">Sign in</Link>
-          <div className="landing-nav-pill"><div className="landing-nav-dot" />Coming Soon</div>
-          <button className="waitlist-btn" onClick={() => scrollTo(waitlistRef)} data-testid="nav-cta">Get Early Access</button>
-        </div>
-      </nav>
-
-      <section className="hero">
-        <div className="orb orb-1"></div><div className="orb orb-2"></div><div className="orb orb-3"></div>
-        <p className="hero-eyebrow">✦ Your AI Creative Operating System</p>
-        <h1 className="hero-headline">Upload once.<br /><em>Build an entire</em><br />content ecosystem.</h1>
-        <p className="hero-sub">ReelLab combines AI moment intelligence, style learning, and multi-platform publishing into one creative operating system. Your footage. Every format. Every platform. Automatically.</p>
-        <p className="hero-subline">Opus' intelligence · Descript's workflow · CapCut's simplicity · <span>Your creative DNA</span></p>
-        <div className="waitlist-wrap">
-          <WaitlistForm tag="hero" />
-        </div>
-        <div className="hero-features">
-          <span className="hero-feat"><span className="hero-feat-dot" />AI Moment Detection</span>
-          <span className="hero-feat"><span className="hero-feat-dot" />Style DNA Learning</span>
-          <span className="hero-feat"><span className="hero-feat-dot" />Multi-Platform Export</span>
-          <span className="hero-feat"><span className="hero-feat-dot" />AI Director Mode</span>
-          <span className="hero-feat"><span className="hero-feat-dot" />Publishing & Analytics</span>
-        </div>
-      </section>
-
-      <div className="stats-bar">
-        <div className="stats-inner">
-          <div><div className="stat-val"><em>10×</em></div><div className="stat-bar-label">Faster than manual editing</div></div>
-          <div><div className="stat-val">8+</div><div className="stat-bar-label">Platforms per upload</div></div>
-          <div><div className="stat-val"><em>∞</em></div><div className="stat-bar-label">Content formats</div></div>
-          <div><div className="stat-val">0</div><div className="stat-bar-label">Creative compromises</div></div>
+    <nav style={{
+      position: "sticky", top: 0, zIndex: 50, padding: "16px 24px",
+      background: scrolled ? "rgba(10,10,15,0.85)" : "transparent",
+      backdropFilter: scrolled ? "blur(20px)" : "none",
+      borderBottom: scrolled ? "1px solid var(--border)" : "1px solid transparent",
+      transition: "all 0.2s",
+    }} data-testid="landing-nav">
+      <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <Link to="/" className="rl-logo"><div className="rl-logo-mark">✦</div><span style={{ fontFamily: "Sora, sans-serif", fontWeight: 600, fontSize: 16 }}>ReelLab</span></Link>
+        <div style={{ display: "flex", gap: 26, alignItems: "center" }}>
+          {[["How it works", "#how"], ["Pricing", "#pricing"], ["Founders", "#founders"]].map(([l, h]) => (
+            <a key={l} href={h} style={{ color: "var(--text-sec)", fontSize: 13.5, fontWeight: 400 }} className="nav-anchor">{l}</a>
+          ))}
+          <Link to="/login" style={{ color: "var(--text-sec)", fontSize: 13.5 }}>Sign in</Link>
+          <Link to="/register" className="btn-primary" data-testid="nav-cta" style={{ padding: "9px 18px", fontSize: 13 }}>Start for free</Link>
         </div>
       </div>
+    </nav>
+  );
+}
 
-      <div className="pain-section">
-        <div className="pain-inner">
-          <h2>Sound familiar? <strong>It doesn't have to.</strong></h2>
-          <div className="pain-list">
-            {PAINS.map((p) => <span key={p} className="pain-tag">{p}</span>)}
-          </div>
-        </div>
+function PlanCard({ plan, name, tag, price, period, note, features, featured, upsell }) {
+  return (
+    <div className={`card ${featured ? "featured" : ""}`} style={{ padding: 28, position: "relative", display: "flex", flexDirection: "column" }} data-testid={`plan-${plan}`}>
+      {featured && <div style={{ position: "absolute", top: -12, right: 22, padding: "4px 12px", borderRadius: 100, background: "var(--purple)", color: "#fff", fontSize: 10, fontFamily: "DM Mono, monospace", letterSpacing: ".1em", textTransform: "uppercase" }}>Most popular</div>}
+      <div className="display-md" style={{ color: "var(--text)", marginBottom: 4 }}>{name}</div>
+      <div style={{ fontSize: 13, color: "var(--text-sec)", marginBottom: 22, minHeight: 38 }}>{tag}</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 4 }}>
+        <span style={{ fontFamily: "Sora, sans-serif", fontWeight: 700, fontSize: 44, color: "var(--text)" }} data-testid={`plan-${plan}-price`}>${price}</span>
+        <span style={{ color: "var(--text-dim)", fontSize: 14 }}>{period}</span>
       </div>
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", fontFamily: "DM Mono, monospace", marginBottom: 22 }}>{note}</div>
+      {upsell && (
+        <div style={{ padding: "8px 12px", background: "var(--amber-light)", color: "var(--amber)", borderRadius: 100, fontSize: 11, marginBottom: 18, textAlign: "center", border: "1px solid rgba(186,117,23,.25)" }}>{upsell}</div>
+      )}
+      <ul style={{ listStyle: "none", padding: 0, margin: 0, marginBottom: 22, flex: 1 }}>
+        {features.map((f) => (
+          <li key={f} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 0", fontSize: 13.5, color: "var(--text-sec)" }}>
+            <Check size={14} style={{ color: "var(--purple-mid)", flexShrink: 0, marginTop: 3 }} /> {f}
+          </li>
+        ))}
+      </ul>
+      <Link to={plan === "free" ? "/register" : `/plan-checkout?plan=${plan}&billing=monthly`} className="btn-primary" data-testid={`plan-${plan}-cta`} style={{ display: "block", textAlign: "center", textDecoration: "none", background: featured ? "var(--purple)" : "var(--surface3)", color: featured ? "#fff" : "var(--text)" }}>
+        {plan === "free" ? "Start free →" : `Get ${name} →`}
+      </Link>
+    </div>
+  );
+}
 
-      <section className="landing-section" ref={featuresRef} id="features">
-        <div className="landing-section-inner">
-          <p className="section-label">The Platform</p>
-          <h2 className="section-title">Not just an editor.<br /><em>An AI creative operator.</em></h2>
-          <p className="section-body">Most tools make one thing faster. ReelLab eliminates the entire workflow — from raw footage to published, optimized, analytics-tracked content across every platform.</p>
-          <div className="features-grid">
-            {FEATURES.map((f) => (
-              <div key={f.num} className="feat-cell" data-testid={`feature-${f.num}`}>
-                <div className="feat-num">{f.num}</div>
-                <span className="feat-icon">{f.icon}</span>
-                <div className="feat-title">{f.title}</div>
-                <div className="feat-body">{f.body}</div>
-                {f.tag && <span className="feat-tag">{f.tag}</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-section" style={{ paddingTop: 0 }}>
-        <div className="landing-section-inner">
-          <p className="section-label">Multi-Platform Output</p>
-          <h2 className="section-title">One upload.<br /><em>Eight platforms. Automatic.</em></h2>
-          <div className="platform-grid">
-            {PLATFORMS.map((p) => (
-              <div key={p.name} className="platform-card" data-testid={`platform-${p.name.replace(/\s/g, "-")}`}>
-                <span className="platform-icon-svg">{p.icon}</span>
-                <div className="platform-info"><h4>{p.name}</h4><p>{p.sub}</p></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-section" style={{ paddingTop: 0 }}>
-        <div className="landing-section-inner">
-          <p className="section-label">Who it's for</p>
-          <h2 className="section-title">Made for creators who<br /><em>refuse to compromise.</em></h2>
-          <p className="section-body">Whether you're a solo creator, a podcaster, a brand, or an agency — ReelLab is your entire content team.</p>
-          <div className="for-grid">
-            {AUDIENCES.map((a) => (
-              <div key={a.title} className="for-card" data-testid={`audience-${a.title.replace(/\s/g, "-")}`}>
-                <div className="for-icon">{a.icon}</div>
-                <h3>{a.title}</h3>
-                <p>{a.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-section" style={{ paddingTop: 0 }}>
-        <div style={{ padding: "0 2rem" }}>
-          <div className="survey-card">
-            <div style={{ display: "flex", alignItems: "center", gap: 20, flex: 1 }}>
-              <div className="survey-icon-wrap">📋</div>
-              <div>
-                <h3 style={{ fontSize: 16, fontWeight: 500, marginBottom: 5 }}>Help us build something you'll actually use.</h3>
-                <p style={{ fontSize: 13, color: "var(--text-sec)", fontWeight: 300, lineHeight: 1.55 }}>Got 2 minutes? Tell us about your content workflow. Your answers shape what ReelLab becomes — and move you to the front of the line.</p>
-              </div>
-            </div>
-            <a href="https://reellabcreatorsurvey.netlify.app" target="_blank" rel="noopener noreferrer" className="survey-btn" data-testid="survey-link">
-              Take the Survey →
-            </a>
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-section" id="founder" ref={founderRef}>
-        <div style={{ padding: "0 2rem" }}>
-          <div className="founder-card">
-            <div style={{ position: "relative", zIndex: 1 }}>
-              <div className="founder-badge"><div className="founder-badge-dot" />Founder Circle</div>
-              <h2>Be part of<br /><em>what we're building.</em></h2>
-              <p>We're building ReelLab with the creators who need it most. Join the Founder Circle for early access, founding-member pricing locked for life, and a direct line to the roadmap.</p>
-              <ul className="perks-list">
-                {[
-                  "Early access — first through the door at launch",
-                  "Founding member pricing, locked in for life",
-                  "Direct line to the team — your feedback shapes the product",
-                  "Exclusive updates before anyone else sees them",
-                  "Priority onboarding & white-glove support at launch",
-                ].map((p) => <li key={p}><div className="perk-check">✦</div>{p}</li>)}
-              </ul>
-            </div>
-            <FounderForm />
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-section" ref={waitlistRef}>
-        <div className="bottom-cta-inner">
-          <div className="mark">✦</div>
-          <h2>Stop thinking about content.<br /><em>Start creating it.</em></h2>
-          <p>Join creators on the waitlist. We'll reach out personally when it's your turn.</p>
-          <div className="waitlist-wrap" style={{ opacity: 1, animation: "none" }}>
-            <WaitlistForm tag="bottom" btnText="Get Early Access" />
-          </div>
-        </div>
-      </section>
-
-      <footer className="landing-footer">
-        <Link to="/" className="rl-logo">
-          <div className="rl-logo-mark" style={{ width: 24, height: 24, fontSize: 11 }}>✦</div>
-          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 13, color: "var(--text-sec)" }}>ReelLab</span>
-        </Link>
-        <div style={{ display: "flex", gap: 20 }}>
-          <Link to="/pricing" className="landing-footer-link" data-testid="footer-pricing">Pricing</Link>
-          <a href="https://reellabcreatorsurvey.netlify.app" target="_blank" rel="noopener noreferrer" className="landing-footer-link">Survey</a>
-          <Link to="/login" className="landing-footer-link" data-testid="footer-signin">Sign In</Link>
-          <a href="mailto:hello@reellabstudio.com" className="landing-footer-link" data-testid="footer-contact">Contact</a>
-        </div>
-        <p>© 2026 ReelLab Studio. All rights reserved.</p>
-      </footer>
-
-      <HelpBotPublic />
+function FooterCol({ title, links }) {
+  return (
+    <div>
+      <div style={{ fontFamily: "DM Mono, monospace", fontSize: 11, letterSpacing: ".15em", textTransform: "uppercase", color: "var(--text-dim)", marginBottom: 14 }}>{title}</div>
+      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        {links.map(([l, h]) => (
+          <li key={l} style={{ marginBottom: 8 }}>
+            <a href={h} style={{ color: "var(--text-sec)", fontSize: 13 }}>{l}</a>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

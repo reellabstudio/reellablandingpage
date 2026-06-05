@@ -1,0 +1,92 @@
+{
+  "summary": "Iteration 9 v9 release — backend 25/25 pytest passed against the LIVE preview URL. Frontend landing visual + pricing + library + onboarding-flow + MOCKED scan all verified. ONE CRITICAL BUG FOUND: Landing.jsx submitSignup calls api.post('/auth/register') directly and never stores the returned JWT in localStorage.rl_token, so the subsequent window.location.href='/onboarding' redirect lands on an unauthenticated session and bounces the user to /login — breaking the entire landing-signup → onboarding flow advertised in the spec.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Landing.jsx submitSignup (lines 44-69)",
+        "issue": "POST /auth/register response is discarded — the returned token is never persisted to localStorage.rl_token. As a result, redirect to /onboarding fails auth and the user lands on /login. Use the existing useAuth().register() helper from /app/frontend/src/lib/auth.jsx which already does localStorage.setItem('rl_token', data.token) + setUser(data.user). Quick fix: replace `await api.post('/auth/register', payload)` with `await register(payload)` after importing useAuth.",
+        "selector": "[data-testid='landing-signup-form'] → [data-testid='signup-submit']",
+        "priority": "CRITICAL"
+      },
+      {
+        "component": "AIEditLimitModal.jsx (line 45)",
+        "issue": "Hard-coded heading 'You've used all 5 AI edits this month' is shown even when a free-tier user (limit=0) hits the modal. Should use the limit from the 402 detail payload or fall back to detail.message.",
+        "selector": "[data-testid='ai-edit-limit-modal'] h3",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Landing → /onboarding via [data-testid='signup-submit']",
+        "issue": "Bug above breaks this flow end-to-end. /onboarding requires auth, so the user gets redirected to /login. Onboarding wizard itself (step-1 → step-4 → onb-finish → /dashboard) was NOT verifiable through this flow because of the auth break.",
+        "affected_selectors": ["[data-testid='landing-signup-form']", "[data-testid='signup-submit']", "[data-testid='onb-step-1']"]
+      }
+    ],
+    "design_issues": []
+  },
+  "verified_working": [
+    "GET /api/pricing v9 shape: free {0,0}, creator {89,900}, studio {199,2100}",
+    "GET /api/pricing limits.free: edits=3, captions=3, calendar_posts=10, ai_edits=0",
+    "GET /api/pricing addons: ai_edits_1=$12 / ai_edits_3=$30 / ai_edits_5=$50",
+    "GET /api/pricing founder: entry_fee=50, tiers.creator.monthly=49, cap=100",
+    "POST /api/payments/checkout package_id='ai_edits_3' → returns Stripe cs_live_ URL (200 OK)",
+    "POST /api/payments/checkout package_id='founder_circle' → returns Stripe URL",
+    "GET /api/usage/me — fresh free user returns plan=free, limits.ai_edits=0, used.ai_edits=0, ai_edit_credits=0; requires auth (401 if anon)",
+    "POST /api/usage/ai-edit/consume — free user gets HTTP 402, detail.code='ai_edits_exhausted', detail.addons present with ai_edits_3",
+    "POST /api/content/posts — 11th post returns 402 with detail.code='calendar_limit'",
+    "POST /api/content/caption/generate — 4th caption returns 402 with detail.code='captions_exhausted' (LLM live)",
+    "POST /api/uploads/presign — returns {upload_url (https://), key, public_url} on reellab-video-generator bucket in us-east-2; requires auth",
+    "POST /api/ai/render — auth-required (401 anon); endpoint exists",
+    "GET /api/ai/render/{id} — auth-required; endpoint exists",
+    "POST /api/ai/transcribe — auth-required; endpoint exists",
+    "POST /api/ceo/campaigns audience=free — 200, returns sent count; inserts a campaigns row",
+    "GET /api/ceo/campaigns — 200, returns campaigns list",
+    "POST /api/ceo/campaigns — 403 for non-CEO",
+    "POST /api/ceo/dm — 200/202 to known user email (smtp may transiently 502)",
+    "GET /api/ceo/analytics — returns mrr, total_users, signups_30d, plan_breakdown, ai_edit_addons_sold, founder_count, founder_cap=100; 403 for non-CEO",
+    "GET /api/ceo/studio-projects — returns {projects}; 403 for non-CEO; PATCH unknown id → 404",
+    "Frontend / (Landing): [data-testid='landing-v9'] present, hero-h1 = 'Film it. ReelLab it. Post it.'",
+    "Pricing on /: ANNUAL default → plan-free-price=$0, plan-creator-price=$75, plan-studio-price=$175; MONTHLY toggle → $89 / $199",
+    "founders-spots renders numeric value (97)",
+    "Visual regression: body font-family contains 'DM Sans', h1 contains 'Sora', body bg=rgb(10,10,15), .btn-primary border-radius=100px (pill)",
+    "No MOCKED text on /, /pricing, /founder-checkout, /content-studio, /editor, /library",
+    "/library rendering: [data-testid='library-page'] with library-search, library-platform, library-status, library-view-grid, library-view-list",
+    "AIEditLimitModal source has all required data-testids: ai-edit-limit-modal, ai-tier-ai_edits_1/3/5 (3 with BEST VALUE badge), ai-modal-buy with text 'Add AI edits — $30' (default pick=ai_edits_3)"
+  ],
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v9.py",
+    "/app/test_reports/pytest/pytest_v9.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Fix Landing.jsx submitSignup to persist the JWT. Replace the raw api.post('/auth/register', ...) with the existing useAuth().register(payload) helper (it does localStorage.setItem('rl_token', data.token) + setUser). Without this fix, the entire landing → onboarding flow is broken.",
+    "LOW: AIEditLimitModal.jsx hard-codes 'You've used all 5 AI edits this month' — for free users (limit=0) this is misleading; use the limit from the 402 detail payload or render detail.message as the headline.",
+    "Optional verification after fix: re-run the onboarding wizard test (step-1 → step-4 → onb-finish → /dashboard) which I could not exercise due to the bug."
+  ],
+  "critical_code_review_comments": [
+    "server.py:2312 /uploads/presign — sanitises filename, uses uuid prefix, returns 503 if S3 not configured. Good.",
+    "server.py:2499 /usage/ai-edit/consume — atomic flow: free user → 402 with addons; paid credit → -1 on user.ai_edit_credits; studio (limit=-1) → unlimited. Good.",
+    "server.py:2543 /content/posts — calendar_limit guard counts existing docs before insert. Note: race-prone if two posts created concurrently at the boundary, but acceptable for the 10-post Free cap.",
+    "server.py:2236 ceo/analytics MRR formula uses pricing.creator.monthly (89) and pricing.studio.monthly (199) directly — does NOT factor in annual subscribers paying 75/175 effective. Acceptable approximation but flag for future.",
+    "Landing.jsx:44-69 — RAW api.post bypasses the auth context, no token storage. Use useAuth().register instead. This is the single biggest UX bug in v9.",
+    "AIEditLimitModal.jsx:45 — hard-coded '5 AI edits' headline conflicts with free-tier limit=0. Use detail.limit or detail.message.",
+    "AIEditLimitModal default pick is ai_edits_3 with the BEST VALUE amber badge — matches the spec '$30 tier BEST VALUE' requirement."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v9.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 pytest)",
+    "frontend": "~85% — landing visual + pricing toggles + /library + /editor MOCKED scans pass; signup→onboarding flow blocked by Landing.jsx token-persistence bug"
+  },
+  "test_credentials": "CEO ceo@reellabstudio.com / ReelLabceo26! ; v9 free test users registered on-the-fly via /api/auth/register (cleanup pending — see seed_data_creation)",
+  "seed_data_creation": "Tests registered ~5 short-lived TEST users with v9t<uuid> usernames + uitest_<uuid>@reellabstudio.com emails. Each test user created 10 TEST_<i> content posts and up to 3 captions for limit checks. One Stripe cs_live_ session was opened but not consumed. No founder rows created (founder_count unchanged at ~3 / 100).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test_v9.py covers the full v9 endpoint surface — re-run with `pytest backend/tests/backend_test_v9.py` against REACT_APP_BACKEND_URL. The ONLY failing path is the frontend Landing.jsx signup token-storage bug; once that's fixed, re-verify (1) the 4-step onboarding wizard navigation (step-1 type → step-2 platforms → step-3 freq → step-4 finish → /dashboard), (2) /editor 402 → AIEditLimitModal flow by uploading a video as a free user and clicking [data-testid='tool-ai-edit']. The modal component itself is fully wired; the blocker is just authenticating into /editor. AI Edit Modal source verified to contain all required testids and the BEST VALUE badge on the $30 tier.",
+  "rca_of_the_issue": "Landing.jsx::submitSignup hits /auth/register directly via the axios `api` client. The response payload {token, user} is discarded — only `setSignupOk(true)` is called. The redirect `window.location.href='/onboarding'` then issues a fresh page load with no Authorization header (interceptor reads localStorage.rl_token which was never set). The /onboarding route guard sees no user and redirects to /login. Fix: import `useAuth` from `../lib/auth` and call `await register({...})` which handles both token persistence and user state hydration. Two-line code change."
+}

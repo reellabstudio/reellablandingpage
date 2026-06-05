@@ -13,7 +13,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
 API = f"{BASE_URL}/api"
 
 CEO_EMAIL = "ceo@reellabstudio.com"
-CEO_PASSWORD = "ReelLabceo26!"
+CEO_PASSWORD = os.environ.get("CEO_PASSWORD", "")
 
 
 @pytest.fixture(scope="session")

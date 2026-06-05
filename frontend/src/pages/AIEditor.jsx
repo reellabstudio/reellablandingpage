@@ -53,7 +53,7 @@ export default function AIEditor() {
           setTimeline(ready.timeline || []);
           setStage("edit");
         }
-      } catch { /* ignore */ }
+      } catch (err) { console.warn("AI projects load failed", err); }
     })();
   }, []);
 

@@ -56,8 +56,8 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data.user);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.warn("auth refresh failed", err);
     }
   };
 
@@ -66,8 +66,8 @@ export function AuthProvider({ children }) {
     if (user) {
       try {
         await api.patch("/auth/profile", { theme: t });
-      } catch {
-        /* non-blocking */
+      } catch (err) {
+        console.warn("theme save failed (non-blocking)", err);
       }
     }
   };

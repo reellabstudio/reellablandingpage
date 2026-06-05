@@ -751,7 +751,7 @@ def _generate_ai_clips() -> List[dict]:
             "duration": dur,
             "accepted": False,
         })
-        start += dur + random.randint(3, 12)
+        start += dur + secrets.randbelow(10) + 3  # 3-12s gap
     return clips
 
 
@@ -880,7 +880,7 @@ async def create_invoice(body: InvoiceIn, user: dict = Depends(require_ceo)):
     inv = {
         "id": str(uuid.uuid4()),
         "owner_id": user["id"],
-        "number": f"INV-{random.randint(1000, 9999)}",
+        "number": f"INV-{1000 + secrets.randbelow(9000)}",
         **body.model_dump(),
         "total": total,
         "status": "draft",
@@ -1231,8 +1231,10 @@ async def ceo_founders(user: dict = Depends(require_ceo)):
 @api.patch("/ceo/users")
 async def ceo_update_user(body: UserAdminIn, user: dict = Depends(require_ceo)):
     upd = {}
-    if body.plan is not None: upd["plan"] = body.plan
-    if body.status is not None: upd["status"] = body.status
+    if body.plan is not None:
+        upd["plan"] = body.plan
+    if body.status is not None:
+        upd["status"] = body.status
     if body.badge is not None:
         upd["badge"] = body.badge
         upd["is_studio"] = body.badge == "blue"

@@ -4,7 +4,13 @@ import api from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Badge, Avatar } from "../components/Logo";
 import { Shield, LogOut, RefreshCw, Plus, Trash2, Save, Edit3, AlertTriangle, Check, X } from "lucide-react";
+import DOMPurify from "dompurify";
 import AccessControl from "./CEOAccessControl";
+
+// Whitelist of safe inline tags for activity feed (CEO-trusted but still server-stored)
+const SAFE_HTML = (raw) => ({
+  __html: DOMPurify.sanitize(raw || "", { ALLOWED_TAGS: ["b", "strong", "em", "i", "u", "a", "br", "span", "code"], ALLOWED_ATTR: ["href", "target", "rel", "class"] }),
+});
 
 const NAV = [
   { section: "Overview", items: [
@@ -174,7 +180,7 @@ function Overview({ showToast }) {
             {activity.map((a) => (
               <div key={a.id} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: ".5px solid var(--border)", alignItems: "flex-start" }} data-testid={`activity-${a.id}`}>
                 <div style={{ width: 7, height: 7, borderRadius: "50%", background: `var(--${a.type || "purple"})`, marginTop: 5, flexShrink: 0 }} />
-                <div style={{ flex: 1, fontSize: 12, color: "var(--text-sec)", lineHeight: 1.5 }} dangerouslySetInnerHTML={{ __html: a.text || a.action }} />
+                <div style={{ flex: 1, fontSize: 12, color: "var(--text-sec)", lineHeight: 1.5 }} dangerouslySetInnerHTML={SAFE_HTML(a.text || a.action)} />
                 <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: "var(--text-dim)" }}>{new Date(a.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
               </div>
             ))}
@@ -212,7 +218,7 @@ function Activity() {
         {rows.map((a) => (
           <div key={a.id} style={{ display: "flex", gap: 10, padding: "10px 0", borderBottom: ".5px solid var(--border)" }}>
             <div style={{ width: 7, height: 7, borderRadius: "50%", background: `var(--${a.type || "purple"})`, marginTop: 5, flexShrink: 0 }} />
-            <div style={{ flex: 1, fontSize: 12, color: "var(--text-sec)" }} dangerouslySetInnerHTML={{ __html: a.text || `<strong>${a.action}</strong> on project ${a.project_id} — ${a.note || ""}` }} />
+            <div style={{ flex: 1, fontSize: 12, color: "var(--text-sec)" }} dangerouslySetInnerHTML={SAFE_HTML(a.text || `<strong>${a.action}</strong> on project ${a.project_id} — ${a.note || ""}`)} />
             <div style={{ fontSize: 10, fontFamily: "'DM Mono', monospace", color: "var(--text-dim)" }}>{new Date(a.at).toLocaleString()}</div>
           </div>
         ))}

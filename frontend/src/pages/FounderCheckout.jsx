@@ -30,11 +30,11 @@ function pickVariant() {
       const v = JSON.parse(raw);
       if (v && (v.variant === "a" || v.variant === "b")) return v.variant;
     }
-  } catch { /* noop */ }
+  } catch (err) { console.warn("AB variant read failed", err); }
   const v = Math.random() < 0.5 ? "a" : "b";
   try {
     localStorage.setItem("rl_ab_founder", JSON.stringify({ variant: v, ts: Date.now() }));
-  } catch { /* noop */ }
+  } catch (err) { console.warn("AB variant write failed", err); }
   return v;
 }
 

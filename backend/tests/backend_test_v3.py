@@ -12,7 +12,7 @@ API = f"{BASE_URL}/api"
 ORIGIN = BASE_URL  # used as origin_url for checkout
 
 CEO_EMAIL = "ceo@reellabstudio.com"
-CEO_PASSWORD = "ReelLabceo26!"
+CEO_PASSWORD = os.environ.get("CEO_PASSWORD", "")
 
 
 def auth_h(tok):

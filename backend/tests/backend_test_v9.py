@@ -26,7 +26,7 @@ if not BASE_URL:
     raise RuntimeError("REACT_APP_BACKEND_URL not set")
 
 CEO_EMAIL = "ceo@reellabstudio.com"
-CEO_PASSWORD = "ReelLabceo26!"
+CEO_PASSWORD = os.environ.get("CEO_PASSWORD", "")
 
 
 def _register_free_user():

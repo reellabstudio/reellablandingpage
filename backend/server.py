@@ -437,7 +437,8 @@ def get_stripe() -> Optional[StripeCheckout]:
     api_key = os.environ.get("STRIPE_API_KEY", "")
     if not api_key:
         return None
-    return StripeCheckout(api_key=api_key, webhook_url="")  # webhook_url overridden per-call
+    webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    return StripeCheckout(api_key=api_key, webhook_url="", webhook_secret=webhook_secret)
 
 
 def stripe_mock_mode() -> bool:

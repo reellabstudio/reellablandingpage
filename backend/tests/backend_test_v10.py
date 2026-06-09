@@ -22,7 +22,7 @@ if not BASE_URL:
     raise RuntimeError("REACT_APP_BACKEND_URL not set")
 
 CEO_EMAIL = "ceo@reellabstudio.com"
-CEO_PASSWORD = os.environ.get("CEO_PASSWORD") or "ReelLabceo26!"
+CEO_PASSWORD = os.environ.get("CEO_PASSWORD", "")
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "reellab_studio")

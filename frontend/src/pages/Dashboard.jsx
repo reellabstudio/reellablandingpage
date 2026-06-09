@@ -24,7 +24,7 @@ export default function Dashboard() {
         setProjects(p.data.projects);
         setClients(c.data.clients);
         setInvoices(i.data.invoices);
-      } catch { /* ignore */ }
+      } catch (err) { console.warn("dashboard load failed", err); }
     })();
     if (user && !user.tutorial_completed && user.role !== "ceo") setTour(true);
   }, [user]);

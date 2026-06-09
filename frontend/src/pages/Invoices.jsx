@@ -31,7 +31,7 @@ export default function Invoices() {
       try {
         const cl = await api.get("/clients");
         setClients(cl.data.clients || []);
-      } catch { /* noop */ }
+      } catch (err) { console.warn("clients load failed", err); }
     }
   };
   useEffect(() => { load(); }, []); // eslint-disable-line

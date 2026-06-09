@@ -56,8 +56,8 @@ Platform Overview · Activity Log · User Management · All Projects · Pricing 
 Verified clean: /invoices, /content-studio, /editor, /founder-checkout — NO "MOCKED" text anywhere visible to users.
 
 ## Test coverage
-- Iteration 1–8: scaffolding → MVP → Stripe LIVE → SMTP LIVE → Content Studio → A/B founder pricing
-- Iteration 9 (v9 — Feb 2026): **FULL REBUILD**. Backend 25/25 pytest. 100% frontend after 2 follow-up fixes (token persist on Landing signup + dynamic AI Edit modal message). End-to-end signup → onboarding → dashboard verified. Real integrations live (AWS S3, OpenAI Whisper, Shotstack, Anthropic). Free tier hard limits enforced. AI Edit add-ons ($12/$30/$50) wired through Stripe.
+- Iteration 1–9: scaffolding → MVP → Stripe LIVE → SMTP LIVE → Content Studio → v9 full rebuild
+- Iteration 10 (v10 payment modal + Stripe hardening — Feb 2026): 13/13 backend pytest; 100% frontend on testable surface. Removed legacy $19 per-upload modal. Modal now fires ONLY on explicit Select Plan / Add-On OR limit exhaustion. Free-tier "feature locked" variant with Upgrade CTAs. Webhook hardened: empty/bad signature → 400, idempotency via webhook_events collection, lifecycle handlers for invoice.payment_failed + customer.subscription.deleted + customer.subscription.updated. Studio tier never sees modal (guard at limit==-1).
 
 ## Backlog (P2, post-launch)
 - Real AI moment detection for /editor (Replicate / Whisper + LLM scoring)

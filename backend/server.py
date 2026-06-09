@@ -1774,6 +1774,9 @@ async def stripe_webhook(request: Request):
 
     body = await request.body()
     sig = request.headers.get("Stripe-Signature", "")
+    if not sig:
+        logger.warning("webhook rejected: missing Stripe-Signature header")
+        raise HTTPException(status_code=400, detail="Missing signature")
     try:
         resp = await stripe.handle_webhook(body, sig)
     except Exception as e:

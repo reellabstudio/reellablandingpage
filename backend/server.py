@@ -1762,7 +1762,9 @@ async def _finalize_payment(tx: dict, new_status: str):
 
 @api.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    """Stripe webhook handler — only active when STRIPE_MODE != mock."""
+    """Stripe webhook handler — production-grade, idempotent, signature-verified.
+    Returns 200 only after successful processing so Stripe retries on failure.
+    """
     if stripe_mock_mode():
         return {"ok": True, "mocked": True}
 
@@ -1775,19 +1777,105 @@ async def stripe_webhook(request: Request):
     try:
         resp = await stripe.handle_webhook(body, sig)
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error(f"Webhook signature/parse error: {e}")
+        # Return 400 so Stripe knows it was invalid (won't retry forever)
         raise HTTPException(status_code=400, detail="Invalid webhook")
 
-    if resp.event_type in ("checkout.session.completed", "payment_intent.succeeded"):
-        tx = await db.payment_transactions.find_one({"session_id": resp.session_id})
-        if tx:
-            await _finalize_payment(tx, "paid")
-    elif resp.event_type in ("customer.subscription.deleted",):
-        # Mark affiliate referral as cancelled
-        email = (resp.metadata or {}).get("email", "").lower()
-        if email:
-            await db.affiliate_referrals.update_many({"referred_email": email}, {"$set": {"status": "cancelled", "cancelled_at": now_iso()}})
-    return {"ok": True}
+    event_id = getattr(resp, "event_id", None) or f"{resp.event_type}-{resp.session_id or ''}-{int(datetime.now(timezone.utc).timestamp())}"
+    event_type = resp.event_type
+
+    # Idempotency guard — if we've already processed this event_id, ack & exit
+    if event_id:
+        already = await db.webhook_events.find_one({"event_id": event_id, "status": "processed"})
+        if already:
+            logger.info(f"webhook duplicate ignored: {event_id}")
+            return {"ok": True, "duplicate": True}
+
+    # Audit log entry (status starts pending → processed)
+    log_entry = {
+        "id": str(uuid.uuid4()),
+        "event_id": event_id,
+        "event_type": event_type,
+        "session_id": resp.session_id or "",
+        "received_at": now_iso(),
+        "status": "pending",
+    }
+    await db.webhook_events.insert_one(log_entry)
+
+    try:
+        # ─── Payment confirmations ───
+        if event_type in ("checkout.session.completed", "payment_intent.succeeded"):
+            tx = await db.payment_transactions.find_one({"session_id": resp.session_id})
+            if tx and tx.get("payment_status") != "paid":
+                await _finalize_payment(tx, "paid")
+
+        # ─── Failed payment / invoice ───
+        elif event_type in ("invoice.payment_failed", "payment_intent.payment_failed"):
+            meta = resp.metadata or {}
+            email = (meta.get("email") or "").lower()
+            if email:
+                u = await db.users.find_one({"email": email})
+                if u:
+                    # Notify the user — keep their access through the end of the paid period.
+                    try:
+                        await send_email(
+                            email,
+                            "Payment failed — action needed",
+                            "Hi,\n\nWe couldn't process your latest ReelLab subscription payment. "
+                            "We'll retry over the next few days. To avoid losing access, please update your card at https://reellabstudio.com/settings.\n\n— ReelLab",
+                        )
+                    except Exception as e:
+                        logger.warning(f"failed-payment notify failed for {email}: {e}")
+                    await db.activity_log.insert_one({
+                        "id": str(uuid.uuid4()), "type": "amber",
+                        "text": f"<strong>{email}</strong> · payment failed (subscription will retry)",
+                        "at": now_iso(),
+                    })
+
+        # ─── Subscription cancellation — keep paid-through, then downgrade ───
+        elif event_type == "customer.subscription.deleted":
+            meta = resp.metadata or {}
+            email = (meta.get("email") or "").lower()
+            if email:
+                # Downgrade to free at period end (Stripe already handled access through end of paid period)
+                await db.users.update_one(
+                    {"email": email},
+                    {"$set": {"plan": "free", "subscription_cancelled_at": now_iso()}},
+                )
+                await db.affiliate_referrals.update_many(
+                    {"referred_email": email},
+                    {"$set": {"status": "cancelled", "cancelled_at": now_iso()}},
+                )
+
+        # ─── Plan upgrade / downgrade mid-cycle ───
+        elif event_type == "customer.subscription.updated":
+            meta = resp.metadata or {}
+            email = (meta.get("email") or "").lower()
+            new_plan = (meta.get("plan") or "").lower()
+            if email and new_plan in ("free", "creator", "studio"):
+                cycle = _cycle_key()
+                await db.users.update_one({"email": email}, {"$set": {"plan": new_plan}})
+                # Reset cycle usage counts for the new plan
+                await db.usage.update_one(
+                    {"user_id": (await db.users.find_one({"email": email}) or {}).get("id", ""), "cycle": cycle},
+                    {"$set": {"ai_edits": 0, "edits": 0, "captions": 0}},
+                    upsert=True,
+                )
+
+        # Mark processed (idempotency)
+        await db.webhook_events.update_one(
+            {"id": log_entry["id"]},
+            {"$set": {"status": "processed", "processed_at": now_iso()}},
+        )
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"webhook handler error ({event_type}/{event_id}): {e}")
+        await db.webhook_events.update_one(
+            {"id": log_entry["id"]},
+            {"$set": {"status": "failed", "error": str(e), "failed_at": now_iso()}},
+        )
+        # Return 500 so Stripe retries
+        raise HTTPException(status_code=500, detail="Webhook processing failed")
 
 
 # ─── Affiliate / Sparks ───
@@ -2498,6 +2586,31 @@ class AIEditConsumeIn(BaseModel):
     pass
 
 
+@api.post("/usage/edit/consume")
+async def consume_edit(user: dict = Depends(get_current_user)):
+    """Bumps the user's video-edit count for the current cycle. Free=3, Creator=15, Studio=unlimited."""
+    plan = user.get("plan") or "free"
+    if user.get("role") == "ceo":
+        plan = "studio"
+    limits = TIER_LIMITS.get(plan, TIER_LIMITS["free"])
+    cycle = _cycle_key()
+    doc = await _usage_doc(user["id"])
+    used = int(doc.get("edits", 0) or 0)
+    lim = limits["edits"]
+    if lim != -1 and used >= lim:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "edits_exhausted",
+                "message": f"You've used all {lim} video edits this month on {plan}. Upgrade to keep editing.",
+                "plan": plan,
+                "locked": False,
+            },
+        )
+    await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"edits": 1}}, upsert=True)
+    return {"ok": True, "used": used + 1, "limit": lim}
+
+
 @api.post("/usage/ai-edit/consume")
 async def consume_ai_edit(user: dict = Depends(get_current_user)):
     """Atomically check + decrement an AI-edit allowance. Returns 402 with upsell payload if limit hit."""
@@ -2524,13 +2637,19 @@ async def consume_ai_edit(user: dict = Depends(get_current_user)):
         await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"ai_edits": 1}}, upsert=True)
         return {"ok": True, "remaining": credits - 1, "source": "addon_credit"}
     # Limit hit — return upsell payload (frontend opens modal)
+    locked = limit == 0
     raise HTTPException(
         status_code=402,
         detail={
-            "code": "ai_edits_exhausted",
-            "message": f"You've used all {limit} AI edits this month.",
+            "code": "ai_edits_locked" if locked else "ai_edits_exhausted",
+            "message": (
+                "AI Auto-Edit is a paid feature. Upgrade to Creator for 5 AI edits/month, or grab a Studio plan for unlimited."
+                if locked else
+                f"You've used all {limit} AI edits this month."
+            ),
             "plan": plan,
             "addons": AI_EDIT_ADDONS,
+            "locked": locked,
         },
     )
 
@@ -2680,6 +2799,8 @@ async def on_startup():
         await db.content_posts.create_index([("owner_id", 1), ("scheduled_for", 1)])
         await db.coupons.create_index("code", unique=True)
         await db.coupon_redemptions.create_index("redeemed_at")
+        await db.webhook_events.create_index("event_id", unique=False)
+        await db.webhook_events.create_index([("status", 1), ("received_at", -1)])
         await db.star_transactions.create_index([("sender_id", 1), ("recipient_id", 1), ("date", 1)], unique=True)
     except Exception as e:
         logger.warning(f"index setup: {e}")

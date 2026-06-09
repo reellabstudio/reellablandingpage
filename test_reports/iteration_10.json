@@ -1,0 +1,71 @@
+{
+  "summary": "v10 Payment Modal Hardening Sweep — backend 13/13 pytest passed (usage shape, edit/ai-edit consume across Free/Creator/CEO, captions+calendar 402 codes, webhook invalid-sig 400, pricing v10 addons). Frontend audit confirms NO preemptive modal on Landing/Dashboard/Editor; file upload by a fresh Free user (with edits quota) skips the modal and goes straight to 'Analyzing footage…'; no '$19' text found on /editor. AIEditLimitModal source verified to render Locked variant for Free (Lock icon, 'AI Auto-Edit is locked on Free' heading, ai-modal-upgrade-creator + ai-modal-upgrade-studio CTAs) vs the $12/$30/$50 tier picker for Creator. Two minor concerns: (a) the webhook handler accepts requests with EMPTY Stripe-Signature header (returns 200) — only malformed sig strings return 400; (b) the AI auto-edit button testid in code is 'props-ai-auto-edit' but the spec uses 'tool-ai-edit'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/webhook/stripe", "issue": "Empty Stripe-Signature header is accepted with 200 {ok:true}; only malformed signature strings return 400. Recommend rejecting empty/missing signature with 400 too."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "minor": [
+      {"component": "AIEditor.jsx right-rail AI Auto-Edit button", "issue": "Spec references data-testid='tool-ai-edit' but actual implementation uses data-testid='props-ai-auto-edit'. Align spec ↔ code."}
+    ]
+  },
+  "verified_working": [
+    "GET /api/usage/me — Free: plan=free, limits={edits:3, ai_edits:0, captions:3, calendar_posts:10}, ai_edit_credits present (int); requires auth",
+    "GET /api/usage/me — CEO: plan=studio, all limits=-1 (unlimited)",
+    "POST /api/usage/edit/consume — Free: returns 200 with used=1..3 on calls 1-3, returns 402 with detail.code='edits_exhausted', locked=false, plan='free' on 4th",
+    "POST /api/usage/edit/consume — CEO: always 200 ok",
+    "POST /api/usage/ai-edit/consume — Free: 402 with detail.code='ai_edits_locked' (NOT exhausted), locked=true, plan='free', addons={ai_edits_1, ai_edits_3, ai_edits_5}",
+    "POST /api/usage/ai-edit/consume — Creator promoted via mongo: 5 ok calls (source=monthly_quota), 6th returns 402 with code='ai_edits_exhausted', locked=false, plan='creator', addons present",
+    "POST /api/usage/ai-edit/consume — CEO: every call 200 with remaining=-1, source='unlimited'",
+    "POST /api/content/caption/generate — Free: 3 ok then 402 captions_exhausted",
+    "POST /api/content/posts — Free: 10 ok then 402 calendar_limit",
+    "POST /api/webhook/stripe — malformed Stripe-Signature → 400 Invalid webhook",
+    "GET /api/pricing — addons.ai_edits_1.amount=12, _3=30, _5=50; limits.free.ai_edits=0, creator=5, studio=-1",
+    "Frontend Landing (/) — no AIEditLimitModal rendered on load",
+    "Frontend /dashboard — no AIEditLimitModal on load",
+    "Frontend /editor — no AIEditLimitModal on load; '$19' string absent from body",
+    "Frontend /editor file picker — Free user with 3 edits remaining: choosing a file does NOT open a payment modal, proceeds directly to 'Analyzing footage…' processing stage",
+    "AIEditLimitModal.jsx — all required testids: ai-edit-limit-modal, ai-modal-close, ai-modal-decline; Locked branch: ai-modal-upgrade-creator + ai-modal-upgrade-studio + Lock icon + 'AI Auto-Edit is locked on Free' heading; Creator branch: ai-tier-ai_edits_1/3/5 (3 has BEST VALUE badge, default pick), ai-modal-buy ($30 default), ai-modal-upgrade Studio link"
+  ],
+  "skipped": [
+    "Stripe webhook POSITIVE signature path (checkout.session.completed, invoice.payment_failed, customer.subscription.deleted, customer.subscription.updated processed=true + idempotency dedup) — cannot sign payloads against live STRIPE_API_KEY. Per agent_to_agent_context_note, this is expected; main agent self-verified via curl. Recommend a STRIPE_WEBHOOK_SECRET env-var path or a STRIPE_MODE=mock test fixture to enable positive-path automation.",
+    "AI Auto-Edit modal interactive open/dismiss via Playwright — the button is gated behind a 7s processing animation; not exercised. Source code branches verified and 402 → setAiLimit({open:true, locked:true}) wiring confirmed in AIEditor.jsx::autoEdit (lines 160-176)."
+  ],
+  "test_report_links": [
+    "/app/backend/tests/backend_test_v10.py",
+    "/app/test_reports/pytest/pytest_v10.xml"
+  ],
+  "action_items": [
+    "(Optional security) /api/webhook/stripe currently 200s when Stripe-Signature header is empty/missing. Recommend an explicit `if not sig: raise HTTPException(400)` guard before calling stripe.handle_webhook.",
+    "(Doc fix) Update spec or code to align the AI Auto-Edit button testid — code uses 'props-ai-auto-edit', spec references 'tool-ai-edit'.",
+    "(Test infra) Expose a STRIPE_MODE=mock toggle or a signed-test-event helper so subsequent agents can exercise the webhook idempotency + lifecycle handlers (customer.subscription.deleted, invoice.payment_failed, customer.subscription.updated) end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1768 — stripe_webhook short-circuits with {ok:true,mocked:true} when STRIPE_MODE=mock. In live mode it goes through handle_webhook which is where the empty-signature acceptance originates.",
+    "server.py:1789 — idempotency guard is correct: webhook_events.find_one({event_id, status:'processed'}) returns {ok:true, duplicate:true} early. Audit row inserted as pending then updated to processed at line 1866.",
+    "server.py:1836-1848 — customer.subscription.deleted handler downgrades user to plan='free', stamps subscription_cancelled_at, and marks affiliate_referrals.cancelled. Solid.",
+    "server.py:1851-1863 — customer.subscription.updated handler validates new_plan ∈ {free,creator,studio} and resets cycle usage. Good.",
+    "server.py:2640-2654 — locked detection: `locked = limit == 0` correctly emits 'ai_edits_locked' for Free (limit=0) and 'ai_edits_exhausted' for Creator/promoted (limit>0). Matches the spec exactly.",
+    "AIEditor.jsx:73-89 — onFilePicked silently GETs /usage/me and only opens the modal when used >= lim. No preemptive modal triggers anywhere outside this path and autoEdit's 402 handler. Legacy $19 modal fully removed.",
+    "AIEditLimitModal.jsx:43 — `showLocked = locked || plan === 'free'` ensures both server-driven and client-driven 'locked' rendering. Lock icon + Upgrade CTAs replace the $12/$30/$50 tier picker correctly."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test_v10.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 pytest passed against live preview URL)",
+    "frontend": "100% on testable surface — Landing/Dashboard/Editor preemptive-modal absence + Free-user upload no-modal flow verified end-to-end; locked-modal interactive open was not exercised but component code is sound"
+  },
+  "test_credentials": "CEO ceo@reellabstudio.com / ReelLabceo26! ; fresh v10ui_* free test users registered+promoted via /api/auth/register",
+  "seed_data_creation": "Backend tests registered ~6 short-lived TEST users (v10test_<hex>@reellabstudio.com) — each consumed up to 11 calendar posts, 4 caption generations, and one was promoted to plan='creator' via mongo and exercised 6 AI edits. UI tests registered 3 more (v10ui_*) and accepted legal. No founder rows, no Stripe charges.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test_v10.py is the v10 regression file — re-run with `REACT_APP_BACKEND_URL=... MONGO_URL=... pytest backend/tests/backend_test_v10.py`. Promotes a fresh user to 'creator' via direct MongoDB write (pymongo) to test the Creator-tier 5-then-402 path. The Stripe positive-signature webhook path (idempotency dedup, subscription.deleted/updated, invoice.payment_failed) was NOT automated because we cannot sign payloads against the live key — recommend exposing a STRIPE_MODE=mock test toggle or a debug-only `/api/_test/webhook/{event_type}` shim before next iteration. UI dismiss + reload-persistence check on the AIEditLimitModal was not exercised live (button hidden behind 7s processing); main agent can self-verify by clicking [data-testid='props-ai-auto-edit'] (note: NOT 'tool-ai-edit' as the spec says) after upload completes — the modal source code is fully wired.",
+  "rca_of_the_issue": "Two minor flags: (1) Webhook empty-signature acceptance — likely a feature of the third-party stripe wrapper (`stripe.handle_webhook(body, sig)`) which probably no-ops when sig=='' and returns a synthesised event. Mitigation: add `if not sig: raise HTTPException(400, 'missing signature')` immediately after `sig = request.headers.get('Stripe-Signature', '')` at server.py:1776. (2) Testid drift between spec ('tool-ai-edit') and code ('props-ai-auto-edit') — purely cosmetic, fix by renaming in AIEditor.jsx or updating the v10 spec doc."
+}

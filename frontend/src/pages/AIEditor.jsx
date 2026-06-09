@@ -26,7 +26,6 @@ export default function AIEditor() {
   const [stage, setStage] = useState("upload"); // upload | processing | edit
   const [progress, setProgress] = useState(0);
   const [stageLabel, setStageLabel] = useState(PROCESSING_STAGES[0]);
-  const [showPayment, setShowPayment] = useState(false);
   const [videoProject, setVideoProject] = useState(null);
   const [clips, setClips] = useState([]);
   const [timeline, setTimeline] = useState([]);
@@ -38,7 +37,7 @@ export default function AIEditor() {
   const [filename, setFilename] = useState("");
   const [toast, setToast] = useState(null);
   const [exportReady, setExportReady] = useState(null); // { url, suggestedPlatform } | null
-  const [aiLimit, setAiLimit] = useState({ open: false, message: "" });
+  const [aiLimit, setAiLimit] = useState({ open: false, message: "", locked: false, plan: "free" });
   const fileInput = useRef(null);
 
   // Load existing video projects on mount
@@ -71,17 +70,30 @@ export default function AIEditor() {
     return `${h}:${m}:${sec}`;
   };
 
-  const onFilePicked = (e) => {
+  const onFilePicked = async (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
     setFilename(f.name);
-    setShowPayment(true);
+    // Check the user's edit quota silently — only modal if exhausted (per v9 spec)
+    try {
+      const { data } = await api.get("/usage/me");
+      const lim = data.limits?.edits ?? 0;
+      const used = data.used?.edits ?? 0;
+      if (lim !== -1 && used >= lim) {
+        setAiLimit({ open: true, message: `You've used all ${lim} video edits this month on your ${data.plan} plan. Upgrade to continue.`, locked: data.plan === "free", plan: data.plan || "free" });
+        return;
+      }
+    } catch (err) { console.warn("usage check failed (allowing through)", err); }
+    // Within quota — go straight to processing, no payment modal
+    confirmPayment();
   };
 
   const confirmPayment = async () => {
-    setShowPayment(false);
     setStage("processing");
     setProgress(0);
+
+    // Bump edits usage on the server (non-blocking)
+    api.post("/usage/edit/consume").catch(() => { /* ignore */ });
 
     // Create upload record
     const { data } = await api.post("/ai/upload", {
@@ -153,7 +165,7 @@ export default function AIEditor() {
     } catch (e) {
       if (e.response?.status === 402) {
         const d = e.response.data?.detail || {};
-        setAiLimit({ open: true, message: d.message || "" });
+        setAiLimit({ open: true, message: d.message || "", locked: !!d.locked, plan: d.plan || "free" });
         return;
       }
       throw e;
@@ -462,30 +474,7 @@ export default function AIEditor() {
         </div>
       </div>
 
-      {showPayment && (
-        <div className="modal-overlay" data-testid="payment-modal">
-          <div className="modal">
-            <div className="modal-title">Complete payment</div>
-            <div className="modal-sub">Pay $19 to process this upload. Secure checkout via Stripe.</div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "0.5px solid var(--border)" }}>
-              <span style={{ fontSize: 13, color: "var(--text-sec)" }}>File</span>
-              <span style={{ fontSize: 13 }}>{filename || "—"}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: "0.5px solid var(--border)" }}>
-              <span style={{ fontSize: 13, color: "var(--text-sec)" }}>AI processing</span>
-              <span style={{ fontSize: 13 }}>$19.00</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 0 22px" }}>
-              <strong>Total</strong>
-              <strong style={{ color: "var(--purple)" }}>$19.00</strong>
-            </div>
-            <button className="btn-primary" style={{ width: "100%", padding: 12 }} onClick={confirmPayment} data-testid="confirm-payment">Pay $19 & process</button>
-            <button className="btn-ghost" style={{ width: "100%", padding: 10, marginTop: 6, fontSize: 12 }} onClick={() => setShowPayment(false)} data-testid="cancel-payment">Cancel</button>
-          </div>
-        </div>
-      )}
-
-      <AIEditLimitModal open={aiLimit.open} message={aiLimit.message} onClose={() => setAiLimit({ open: false, message: "" })} />
+      <AIEditLimitModal open={aiLimit.open} message={aiLimit.message} locked={aiLimit.locked} plan={aiLimit.plan} onClose={() => setAiLimit({ open: false, message: "", locked: false, plan: "free" })} />
     </div>
   );
 }

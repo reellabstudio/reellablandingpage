@@ -2665,6 +2665,95 @@ async def list_content_posts(user: dict = Depends(get_current_user)):
     return {"posts": posts}
 
 
+# ─── Connectors (social platform linking — IG/TT/YT/X/FB) ───
+class ConnectorIn(BaseModel):
+    platform: Literal["instagram", "tiktok", "youtube", "x", "facebook"]
+    handle: str = Field(min_length=1, max_length=80)
+    access_token: Optional[str] = ""
+    connected: bool = True
+
+
+@api.get("/connectors")
+async def list_connectors(user: dict = Depends(get_current_user)):
+    rows = await db.connectors.find({"owner_id": user["id"]}, {"_id": 0, "access_token": 0}).to_list(20)
+    return {"connectors": rows}
+
+
+@api.post("/connectors")
+async def upsert_connector(body: ConnectorIn, user: dict = Depends(get_current_user)):
+    plan = user.get("plan") or "free"
+    if user.get("role") != "ceo" and plan != "studio":
+        raise HTTPException(status_code=402, detail={
+            "code": "studio_only", "message": "Direct publishing connectors are Studio-only.", "plan": plan,
+        })
+    rec = {
+        "id": str(uuid.uuid4()),
+        "owner_id": user["id"],
+        "platform": body.platform,
+        "handle": body.handle.strip(),
+        "connected": True,
+        "updated_at": now_iso(),
+    }
+    await db.connectors.update_one(
+        {"owner_id": user["id"], "platform": body.platform},
+        {"$set": rec, "$setOnInsert": {"created_at": now_iso()}},
+        upsert=True,
+    )
+    rec.pop("_id", None)
+    return {"connector": rec}
+
+
+@api.delete("/connectors/{platform}")
+async def remove_connector(platform: str, user: dict = Depends(get_current_user)):
+    await db.connectors.delete_one({"owner_id": user["id"], "platform": platform})
+    return {"ok": True}
+
+
+# ─── Gemini Nano Banana image generation ───
+class ImageGenIn(BaseModel):
+    prompt: str = Field(min_length=4, max_length=600)
+    aspect: Optional[Literal["9:16", "1:1", "16:9", "4:5"]] = "1:1"
+
+
+@api.post("/ai/image/generate")
+async def generate_image(body: ImageGenIn, user: dict = Depends(get_current_user)):
+    """Generate a thumbnail via Gemini Nano Banana. Counts toward captions budget on Free/Creator."""
+    plan = user.get("plan") or "free"
+    if user.get("role") != "ceo":
+        limits = TIER_LIMITS.get(plan, TIER_LIMITS["free"])
+        cap = limits.get("captions", 3)
+        if cap >= 0:
+            doc = await _usage_doc(user["id"])
+            used = int(doc.get("captions", 0) or 0)
+            if used >= cap:
+                raise HTTPException(status_code=402, detail={
+                    "code": "captions_exhausted",
+                    "message": f"You've used your {cap} AI generations this month.",
+                    "plan": plan, "addons": AI_EDIT_ADDONS,
+                })
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+    except Exception:
+        raise HTTPException(status_code=503, detail="AI integration unavailable")
+    api_key = os.environ.get("EMERGENT_LLM_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="LLM key not configured")
+    chat = LlmChat(
+        api_key=api_key,
+        session_id=f"img-{user['id']}-{uuid.uuid4().hex[:8]}",
+        system_message="You are an image-generation assistant. Generate a striking on-brand social media thumbnail.",
+    ).with_model("gemini", "gemini-2.5-flash-image-preview")
+    try:
+        resp = await chat.send_message(UserMessage(text=f"Aspect: {body.aspect}. Brief: {body.prompt.strip()}"))
+    except Exception as e:
+        logger.error(f"image gen failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Image generation failed: {e}")
+    if user.get("role") != "ceo":
+        cycle = _cycle_key()
+        await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"captions": 1}}, upsert=True)
+    return {"prompt": body.prompt, "aspect": body.aspect, "result": str(resp)[:500000]}
+
+
 @api.post("/content/posts")
 async def create_content_post(body: ContentPostIn, user: dict = Depends(get_current_user)):
     # Enforce Free tier 10-post calendar cap

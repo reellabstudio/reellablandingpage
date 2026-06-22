@@ -19,6 +19,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -2666,6 +2667,7 @@ async def list_content_posts(user: dict = Depends(get_current_user)):
 
 
 # ─── Connectors (social platform linking — IG/TT/YT/X/FB) ───
+# Supports both manual handle storage AND real OAuth (YouTube=Google, Instagram+Facebook=Meta).
 class ConnectorIn(BaseModel):
     platform: Literal["instagram", "tiktok", "youtube", "x", "facebook"]
     handle: str = Field(min_length=1, max_length=80)
@@ -2675,12 +2677,16 @@ class ConnectorIn(BaseModel):
 
 @api.get("/connectors")
 async def list_connectors(user: dict = Depends(get_current_user)):
-    rows = await db.connectors.find({"owner_id": user["id"]}, {"_id": 0, "access_token": 0}).to_list(20)
+    rows = await db.connectors.find(
+        {"owner_id": user["id"]},
+        {"_id": 0, "access_token": 0, "refresh_token": 0},
+    ).to_list(20)
     return {"connectors": rows}
 
 
 @api.post("/connectors")
 async def upsert_connector(body: ConnectorIn, user: dict = Depends(get_current_user)):
+    """Manual handle save (no real OAuth — for TikTok / X / quick stub entries)."""
     plan = user.get("plan") or "free"
     if user.get("role") != "ceo" and plan != "studio":
         raise HTTPException(status_code=402, detail={
@@ -2692,6 +2698,7 @@ async def upsert_connector(body: ConnectorIn, user: dict = Depends(get_current_u
         "platform": body.platform,
         "handle": body.handle.strip(),
         "connected": True,
+        "auth_type": "manual",
         "updated_at": now_iso(),
     }
     await db.connectors.update_one(
@@ -2709,6 +2716,171 @@ async def remove_connector(platform: str, user: dict = Depends(get_current_user)
     return {"ok": True}
 
 
+# ── OAuth: Google (YouTube) + Meta (Facebook + Instagram) ──
+_OAUTH_CONFIG = {
+    "youtube": {
+        "provider": "google",
+        "client_id_env": "GOOGLE_OAUTH_CLIENT_ID",
+        "client_secret_env": "GOOGLE_OAUTH_CLIENT_SECRET",
+        "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "scope": "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile",
+        "profile_url": "https://www.googleapis.com/oauth2/v2/userinfo",
+    },
+    "facebook": {
+        "provider": "meta",
+        "client_id_env": "META_OAUTH_CLIENT_ID",
+        "client_secret_env": "META_OAUTH_CLIENT_SECRET",
+        "auth_url": "https://www.facebook.com/v18.0/dialog/oauth",
+        "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
+        "scope": "pages_show_list,pages_read_engagement,public_profile",
+        "profile_url": "https://graph.facebook.com/me?fields=id,name",
+    },
+    "instagram": {
+        "provider": "meta",
+        "client_id_env": "META_OAUTH_CLIENT_ID",
+        "client_secret_env": "META_OAUTH_CLIENT_SECRET",
+        "auth_url": "https://www.facebook.com/v18.0/dialog/oauth",
+        "token_url": "https://graph.facebook.com/v18.0/oauth/access_token",
+        "scope": "instagram_basic,pages_show_list,public_profile",
+        "profile_url": "https://graph.facebook.com/me?fields=id,name",
+    },
+}
+
+
+def _oauth_redirect_base() -> str:
+    base = os.environ.get("OAUTH_REDIRECT_BASE") or os.environ.get("BACKEND_PUBLIC_URL") or ""
+    if not base:
+        # Best-effort fallback: production domain
+        base = f"https://{os.environ.get('APP_DOMAIN', 'reellabstudio.com')}"
+    return base.rstrip("/")
+
+
+def _oauth_redirect_uri(platform: str) -> str:
+    return f"{_oauth_redirect_base()}/api/connectors/oauth/{platform}/callback"
+
+
+@api.get("/connectors/oauth/{platform}/start")
+async def oauth_start(platform: str, return_to: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Begin OAuth flow. Returns auth_url or setup_required when env vars missing."""
+    cfg = _OAUTH_CONFIG.get(platform)
+    if not cfg:
+        raise HTTPException(status_code=400, detail={"code": "no_oauth", "message": f"{platform} does not support OAuth here — use manual handle entry."})
+    plan = user.get("plan") or "free"
+    if user.get("role") != "ceo" and plan != "studio":
+        raise HTTPException(status_code=402, detail={"code": "studio_only", "message": "Direct publishing connectors are Studio-only.", "plan": plan})
+
+    client_id = os.environ.get(cfg["client_id_env"])
+    client_secret = os.environ.get(cfg["client_secret_env"])
+    if not client_id or not client_secret:
+        return {
+            "setup_required": True,
+            "platform": platform,
+            "provider": cfg["provider"],
+            "missing": [k for k, v in [(cfg["client_id_env"], client_id), (cfg["client_secret_env"], client_secret)] if not v],
+            "redirect_uri": _oauth_redirect_uri(platform),
+        }
+
+    state = secrets.token_urlsafe(24)
+    await db.oauth_states.insert_one({
+        "state": state,
+        "user_id": user["id"],
+        "platform": platform,
+        "return_to": (return_to or "/profile")[:300],
+        "created_at": now_iso(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
+    })
+
+    from urllib.parse import urlencode
+    params = {
+        "client_id": client_id,
+        "redirect_uri": _oauth_redirect_uri(platform),
+        "response_type": "code",
+        "scope": cfg["scope"],
+        "state": state,
+        "access_type": "offline" if cfg["provider"] == "google" else None,
+        "prompt": "consent" if cfg["provider"] == "google" else None,
+    }
+    params = {k: v for k, v in params.items() if v is not None}
+    return {"auth_url": f"{cfg['auth_url']}?{urlencode(params)}", "state": state}
+
+
+@api.get("/connectors/oauth/{platform}/callback")
+async def oauth_callback(platform: str, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """OAuth callback. Exchanges code for access token, stores connector, redirects to frontend."""
+    frontend = f"https://{os.environ.get('APP_DOMAIN', 'reellabstudio.com')}"
+
+    if error or not code or not state:
+        return RedirectResponse(url=f"{frontend}/profile?connector_error={error or 'missing_code'}")
+
+    st = await db.oauth_states.find_one({"state": state, "platform": platform})
+    if not st:
+        return RedirectResponse(url=f"{frontend}/profile?connector_error=invalid_state")
+    # One-time use
+    await db.oauth_states.delete_one({"_id": st["_id"]})
+
+    cfg = _OAUTH_CONFIG.get(platform)
+    if not cfg:
+        return RedirectResponse(url=f"{frontend}/profile?connector_error=no_oauth")
+
+    client_id = os.environ.get(cfg["client_id_env"])
+    client_secret = os.environ.get(cfg["client_secret_env"])
+    if not client_id or not client_secret:
+        return RedirectResponse(url=f"{frontend}/profile?connector_error=not_configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as cli:
+            tok_resp = await cli.post(
+                cfg["token_url"],
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "redirect_uri": _oauth_redirect_uri(platform),
+                    "grant_type": "authorization_code",
+                },
+                headers={"Accept": "application/json"},
+            )
+            tok_resp.raise_for_status()
+            tok = tok_resp.json()
+            access_token = tok.get("access_token")
+            refresh_token = tok.get("refresh_token", "")
+            if not access_token:
+                logger.error(f"oauth {platform}: no access_token in {tok}")
+                return RedirectResponse(url=f"{frontend}/profile?connector_error=token_exchange")
+
+            # Fetch handle / display name
+            prof_resp = await cli.get(
+                cfg["profile_url"],
+                params={"access_token": access_token} if cfg["provider"] == "meta" else None,
+                headers={"Authorization": f"Bearer {access_token}"} if cfg["provider"] == "google" else None,
+            )
+            prof = prof_resp.json() if prof_resp.status_code == 200 else {}
+            handle = prof.get("name") or prof.get("email") or "Connected"
+    except Exception as e:
+        logger.error(f"oauth {platform} exchange failed: {e}")
+        return RedirectResponse(url=f"{frontend}/profile?connector_error=exchange_failed")
+
+    rec = {
+        "id": str(uuid.uuid4()),
+        "owner_id": st["user_id"],
+        "platform": platform,
+        "provider": cfg["provider"],
+        "handle": handle,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "connected": True,
+        "auth_type": "oauth",
+        "updated_at": now_iso(),
+    }
+    await db.connectors.update_one(
+        {"owner_id": st["user_id"], "platform": platform},
+        {"$set": rec, "$setOnInsert": {"created_at": now_iso()}},
+        upsert=True,
+    )
+    return RedirectResponse(url=f"{frontend}{st.get('return_to', '/profile')}?connector_connected={platform}")
+
+
 # ─── Gemini Nano Banana image generation ───
 class ImageGenIn(BaseModel):
     prompt: str = Field(min_length=4, max_length=600)
@@ -2717,7 +2889,7 @@ class ImageGenIn(BaseModel):
 
 @api.post("/ai/image/generate")
 async def generate_image(body: ImageGenIn, user: dict = Depends(get_current_user)):
-    """Generate a thumbnail via Gemini Nano Banana. Counts toward captions budget on Free/Creator."""
+    """Generate cover art via Gemini Nano Banana. Counts toward captions budget on Free/Creator."""
     plan = user.get("plan") or "free"
     if user.get("role") != "ceo":
         limits = TIER_LIMITS.get(plan, TIER_LIMITS["free"])
@@ -2738,20 +2910,45 @@ async def generate_image(body: ImageGenIn, user: dict = Depends(get_current_user
     api_key = os.environ.get("EMERGENT_LLM_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="LLM key not configured")
+
+    aspect_hint = {
+        "9:16": "vertical 9:16 portrait Reels / TikTok / Shorts aspect ratio",
+        "1:1": "square 1:1 Instagram feed aspect ratio",
+        "16:9": "horizontal 16:9 widescreen aspect ratio",
+        "4:5": "vertical 4:5 Instagram portrait aspect ratio",
+    }.get(body.aspect or "1:1", "square 1:1")
+
     chat = LlmChat(
         api_key=api_key,
         session_id=f"img-{user['id']}-{uuid.uuid4().hex[:8]}",
-        system_message="You are an image-generation assistant. Generate a striking on-brand social media thumbnail.",
-    ).with_model("gemini", "gemini-2.5-flash-image-preview")
+        system_message="You generate striking, scroll-stopping social media cover art and thumbnails. No text in the image unless explicitly requested.",
+    ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+
+    msg = UserMessage(
+        text=f"Generate a high-quality {aspect_hint} cover art / thumbnail image. Brief: {body.prompt.strip()}"
+    )
     try:
-        resp = await chat.send_message(UserMessage(text=f"Aspect: {body.aspect}. Brief: {body.prompt.strip()}"))
+        _text, images = await chat.send_message_multimodal_response(msg)
     except Exception as e:
         logger.error(f"image gen failed: {e}")
-        raise HTTPException(status_code=502, detail=f"Image generation failed: {e}")
+        raise HTTPException(status_code=502, detail="Image generation failed — please retry.")
+
+    if not images:
+        raise HTTPException(status_code=502, detail="No image returned — try a more visual prompt.")
+
+    img0 = images[0]
+    mime = img0.get("mime_type", "image/png")
+    b64 = img0.get("data", "")
+    if not b64:
+        raise HTTPException(status_code=502, detail="Empty image payload — please retry.")
+
+    # Return inline data URL — most reliable across environments without bucket policy setup.
+    # Future enhancement: route through a CDN with a public-read S3 prefix.
     if user.get("role") != "ceo":
         cycle = _cycle_key()
         await db.usage.update_one({"user_id": user["id"], "cycle": cycle}, {"$inc": {"captions": 1}}, upsert=True)
-    return {"prompt": body.prompt, "aspect": body.aspect, "result": str(resp)[:500000]}
+
+    return {"prompt": body.prompt, "aspect": body.aspect, "image_data_url": f"data:{mime};base64,{b64}", "mime": mime}
 
 
 @api.post("/content/posts")

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useAuth } from "../lib/auth";
 import api, { formatErr } from "../lib/api";
 import { Avatar, Badge } from "../components/Logo";
+import ConnectorsModal from "../components/ConnectorsModal";
+import { Plug } from "lucide-react";
 
 export default function Profile() {
   const { user, refresh } = useAuth();
@@ -19,6 +21,7 @@ export default function Profile() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [saving, setSaving] = useState(false);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
 
   const set = (k, v) => setForm({ ...form, [k]: v });
   const setSocial = (k, v) => setForm({ ...form, social_handles: { ...form.social_handles, [k]: v } });
@@ -119,6 +122,34 @@ export default function Profile() {
 
         <button className="btn-primary" onClick={save} disabled={saving} data-testid="profile-save">{saving ? "Saving…" : "Save changes"}</button>
       </div>
+
+      <div className="card" style={{ marginTop: 24 }} data-testid="profile-connectors-card">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <h3 style={{ fontSize: 15, marginBottom: 6 }}>Publishing connectors</h3>
+            <p style={{ fontSize: 12, color: "var(--text-sec)", lineHeight: 1.6, maxWidth: 420 }}>
+              Link Instagram, YouTube, Facebook, TikTok, or X to publish directly from ReelLab Studio.
+              {(user.plan !== "studio" && user.role !== "ceo") && " Studio plan required for direct publishing."}
+            </p>
+          </div>
+          <button
+            className="btn-secondary"
+            onClick={() => setConnectorsOpen(true)}
+            data-testid="open-connectors-profile"
+            style={{ padding: "8px 14px" }}
+          >
+            <Plug size={13} style={{ display: "inline", marginRight: 6 }} /> Manage connectors
+          </button>
+        </div>
+      </div>
+
+      {connectorsOpen && (
+        <ConnectorsModal
+          onClose={() => setConnectorsOpen(false)}
+          plan={user.plan || "free"}
+          role={user.role || "client"}
+        />
+      )}
     </div>
   );
 }

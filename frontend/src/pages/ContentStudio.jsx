@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import api from "../lib/api";
-import { Calendar as CalIcon, Plus, Trash2, Sparkles, Instagram, Music2, Youtube, Twitter, Facebook, X as XIcon } from "lucide-react";
+import { useAuth } from "../lib/auth";
+import ConnectorsModal from "../components/ConnectorsModal";
+import { Calendar as CalIcon, Plus, Trash2, Sparkles, Instagram, Music2, Youtube, Twitter, Facebook, X as XIcon, Image as ImageIcon, Plug } from "lucide-react";
 
 const PLATFORMS = [
   { key: "instagram", label: "Instagram", Icon: Instagram, color: "#E1306C" },
@@ -19,12 +21,14 @@ const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
 const endOfMonth = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
 
 export default function ContentStudio() {
+  const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [view, setView] = useState("month"); // 'month' | 'week'
   const [cursor, setCursor] = useState(new Date());
   const [posts, setPosts] = useState([]);
   const [modal, setModal] = useState(null); // post being created/edited
   const [genOpen, setGenOpen] = useState(false);
+  const [connectorsOpen, setConnectorsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
@@ -121,6 +125,9 @@ export default function ContentStudio() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <h1 className="page-title">Content Studio</h1>
         <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-secondary" onClick={() => setConnectorsOpen(true)} data-testid="open-connectors" style={{ padding: "8px 14px" }}>
+            <Plug size={14} style={{ display: "inline", marginRight: 6 }} /> Connectors
+          </button>
           <button className="btn-secondary" onClick={() => setGenOpen(true)} data-testid="open-caption-gen" style={{ padding: "8px 14px" }}>
             <Sparkles size={14} style={{ display: "inline", marginRight: 6 }} /> Caption AI
           </button>
@@ -223,6 +230,14 @@ export default function ContentStudio() {
           }}
         />
       )}
+
+      {connectorsOpen && (
+        <ConnectorsModal
+          onClose={() => setConnectorsOpen(false)}
+          plan={user?.plan || "free"}
+          role={user?.role || "client"}
+        />
+      )}
     </div>
   );
 }
@@ -232,6 +247,11 @@ function PostModal({ post, onChange, onClose, onSave, onDelete, busy }) {
   const [genBusy, setGenBusy] = useState(false);
   const [options, setOptions] = useState([]);
   const [err, setErr] = useState("");
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgPrompt, setImgPrompt] = useState("");
+  const [imgAspect, setImgAspect] = useState("1:1");
+  const [imgOpen, setImgOpen] = useState(false);
+  const [imgErr, setImgErr] = useState("");
 
   const set = (k, v) => onChange({ ...post, [k]: v });
 
@@ -251,6 +271,23 @@ function PostModal({ post, onChange, onClose, onSave, onDelete, busy }) {
       setErr(typeof d === "string" ? d : (d?.message || "Couldn't generate captions"));
     }
     setGenBusy(false);
+  };
+
+  const generateImage = async () => {
+    setImgErr("");
+    const prompt = (imgPrompt || post.caption || post.title || "").trim();
+    if (prompt.length < 4) return setImgErr("Add a prompt (at least 4 characters).");
+    setImgBusy(true);
+    try {
+      const { data } = await api.post("/ai/image/generate", { prompt, aspect: imgAspect });
+      const url = data.image_url || data.image_data_url;
+      if (url) set("media_url", url);
+      else setImgErr("No image returned — try again.");
+    } catch (e) {
+      const d = e.response?.data?.detail;
+      setImgErr(typeof d === "string" ? d : (d?.message || "Couldn't generate image."));
+    }
+    setImgBusy(false);
   };
 
   const dt = new Date(post.scheduled_for);
@@ -322,7 +359,68 @@ function PostModal({ post, onChange, onClose, onSave, onDelete, busy }) {
         </div>
 
         <label className="label">Media URL (clip / image)</label>
-        <input className="input" value={post.media_url || ""} onChange={(e) => set("media_url", e.target.value)} placeholder="https://… (optional)" data-testid="post-media" style={{ marginBottom: 16 }} />
+        <input className="input" value={post.media_url || ""} onChange={(e) => set("media_url", e.target.value)} placeholder="https://… (optional)" data-testid="post-media" style={{ marginBottom: 8 }} />
+
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() => { setImgOpen(!imgOpen); if (!imgOpen) setImgPrompt(post.caption || post.title || ""); }}
+          data-testid="open-image-gen"
+          style={{ padding: "6px 14px", fontSize: 12, marginBottom: imgOpen ? 10 : 16 }}
+        >
+          <ImageIcon size={12} style={{ display: "inline", marginRight: 4 }} /> {imgOpen ? "Hide cover art generator" : "Generate cover art (AI)"}
+        </button>
+
+        {imgOpen && (
+          <div data-testid="image-gen-block" style={{ padding: 12, background: "var(--surface2)", border: "0.5px solid var(--border)", borderRadius: 8, marginBottom: 16 }}>
+            <label className="label">Prompt</label>
+            <textarea
+              className="input"
+              rows={2}
+              value={imgPrompt}
+              onChange={(e) => setImgPrompt(e.target.value)}
+              data-testid="image-gen-prompt"
+              placeholder="e.g. 'cinematic neon-lit studio, creator at editing desk, dramatic purple lighting'"
+              style={{ marginBottom: 10, resize: "vertical" }}
+            />
+            <label className="label">Aspect</label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+              {["9:16", "1:1", "16:9", "4:5"].map((a) => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setImgAspect(a)}
+                  data-testid={`image-aspect-${a}`}
+                  style={{
+                    padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer",
+                    border: `1px solid ${imgAspect === a ? "var(--purple-light)" : "var(--border)"}`,
+                    background: imgAspect === a ? "var(--purple-glow)" : "transparent",
+                    color: imgAspect === a ? "var(--purple-light)" : "var(--text-sec)",
+                  }}
+                >{a}</button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={generateImage}
+              disabled={imgBusy}
+              data-testid="image-gen-submit"
+              style={{ width: "100%", padding: 10, fontSize: 12 }}
+            >
+              {imgBusy ? "Generating…" : <><ImageIcon size={12} style={{ display: "inline", marginRight: 6 }} /> Generate with Nano Banana</>}
+            </button>
+            {imgErr && <div style={{ fontSize: 12, color: "var(--coral)", marginTop: 8 }} data-testid="image-gen-error">{imgErr}</div>}
+            {post.media_url && (
+              <img
+                src={post.media_url}
+                alt="Generated cover"
+                data-testid="image-gen-preview"
+                style={{ marginTop: 10, width: "100%", maxHeight: 240, objectFit: "cover", borderRadius: 8, border: "0.5px solid var(--border)" }}
+              />
+            )}
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn-primary" onClick={onSave} disabled={busy} data-testid="post-save" style={{ flex: 1 }}>
@@ -387,7 +485,7 @@ function CaptionGenerator({ onClose, onUse }) {
           ))}
         </div>
 
-        <label className="label">What's the content about?</label>
+        <label className="label">What&apos;s the content about?</label>
         <textarea className="input" rows={4} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="e.g. 'A behind-the-scenes look at editing our latest music video — long hours, emotional moments, the final reveal.'" data-testid="gen-topic" style={{ marginBottom: 12, resize: "vertical" }} />
 
         <button className="btn-primary" onClick={generate} disabled={busy} data-testid="gen-submit" style={{ width: "100%", padding: 12, marginBottom: 14 }}>

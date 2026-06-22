@@ -2806,9 +2806,15 @@ async def oauth_start(platform: str, return_to: Optional[str] = None, user: dict
 
 
 @api.get("/connectors/oauth/{platform}/callback")
-async def oauth_callback(platform: str, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+async def oauth_callback(request: Request, platform: str, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     """OAuth callback. Exchanges code for access token, stores connector, redirects to frontend."""
-    frontend = f"https://{os.environ.get('APP_DOMAIN', 'reellabstudio.com')}"
+    # Derive frontend origin from the actual request host (same domain as backend in this app).
+    # Respect X-Forwarded-Proto when behind ingress/load balancer (preview + prod terminate TLS upstream).
+    fwd_proto = request.headers.get("x-forwarded-proto") or "https"
+    scheme = fwd_proto.split(",")[0].strip() or "https"
+    if request.url.netloc.startswith("localhost") or request.url.netloc.startswith("127."):
+        scheme = "http"
+    frontend = f"{scheme}://{request.url.netloc}"
 
     if error or not code or not state:
         return RedirectResponse(url=f"{frontend}/profile?connector_error={error or 'missing_code'}")

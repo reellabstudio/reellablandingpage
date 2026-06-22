@@ -58,14 +58,21 @@ Verified clean: /invoices, /content-studio, /editor, /founder-checkout — NO "M
 ## Test coverage
 - Iteration 1–9: scaffolding → MVP → Stripe LIVE → SMTP LIVE → Content Studio → v9 full rebuild
 - Iteration 10 (v10 payment modal + Stripe hardening — Feb 2026): 13/13 backend pytest; 100% frontend on testable surface. Removed legacy $19 per-upload modal. Modal now fires ONLY on explicit Select Plan / Add-On OR limit exhaustion. Free-tier "feature locked" variant with Upgrade CTAs. Webhook hardened: empty/bad signature → 400, idempotency via webhook_events collection, lifecycle handlers for invoice.payment_failed + customer.subscription.deleted + customer.subscription.updated. Studio tier never sees modal (guard at limit==-1).
+- Iteration 11 (Feb 2026 — Gemini Nano Banana + Connectors): 24/24 backend pytest, 100% frontend on both new surfaces. AI cover-art generator inside Content Studio PostModal (Gemini 3.1 Flash Image Preview via EMERGENT_LLM_KEY → returns base64 data URL since S3 bucket has block-public-access on; data URL is auto-stored as media_url and previewed inline). ConnectorsModal for IG/TT/YT/X/FB with: real OAuth scaffolding for YouTube (Google) + IG/FB (Meta single app) — returns setup_required JSON with the exact missing env var names + redirect_uri when GOOGLE_OAUTH_* / META_OAUTH_* are unset; manual handle entry fallback for all platforms; TikTok + X manual-only by design. Studio-plan-only gate enforced server-side on both POST /api/connectors and /api/connectors/oauth/{platform}/start. Profile page now has 'Manage connectors' entrypoint.
 
 ## Backlog (P2, post-launch)
 - Real AI moment detection for /editor (Replicate / Whisper + LLM scoring)
 - Affiliate payout automation (Stripe Connect, $25 threshold)
-- Stripe webhook signing secret (`whsec_...`) — currently optional
+- Wire real OAuth credentials: set GOOGLE_OAUTH_CLIENT_ID/SECRET + META_OAUTH_CLIENT_ID/SECRET in backend/.env, register redirect URI `https://reellabstudio.com/api/connectors/oauth/{platform}/callback` in each provider's developer console
+- TikTok + X OAuth (manual handle entry only for now)
+- Enable public-read on `ai/img/` prefix in S3 bucket (or front with CloudFront) so generated cover art gets a permanent URL instead of base64 data URL
+- Field-level encryption for stored connector access_token / refresh_token
 - Content Studio: cross-platform publishing via Buffer/Hootsuite APIs
 - Pre-production toolkit (Brief / Shot List / Call Sheet)
 - DMs, push notifications
 - Team invites per project
 - Mobile native apps
 - Plan-upgrade checkout flow (currently only Founder Circle has a UI; Solo/Creator/Studio coupon UI awaits a Pricing checkout flow)
+- Refactor large files: server.py → modular routers; AIEditor.jsx, FounderCheckout.jsx → smaller components
+- Move auth tokens from localStorage → httpOnly cookies (XSS hardening)
+- Audit React hook dependency warnings (ContentStudio.jsx, Dashboard.jsx, FounderCheckout.jsx)
